@@ -1,0 +1,5 @@
+id|title|hostDoctorId|scheduledAt|status|meetingUrl|notes
+d143d40e-7cb2-4f02-a3da-f12de4c1558d|呼吸科远程专家会诊|2b4936cb-089f-4379-92bd-82ab842c1688|2025-11-03T15:00|SCHEDULED|https://meet.example.com/session/respiratory|患者持续咳嗽，请会诊呼吸科专家
+7196009a-e392-4efd-9e65-2e9c827c5e74|骨科疑难病例讨论|580bd327-3564-4856-9a1b-fc301a7b3aa9|2025-10-28T19:30|COMPLETED|https://meet.example.com/session/orthopedic|术后康复方案评估
+d8c6ab3f-8531-4fef-9c9e-601a6f46b90e|神经内科会诊：TIA后管理|7ad821a4-0b2f-4bb6-85a2-6be7a329a1f1|2025-11-06T16:00|SCHEDULED|https://meet.example.com/session/neuro|患者短暂性脑缺血发作后制定二级预防方案
+8cb2a079-4b9d-4e4c-9ca3-b229b9c96589|皮肤免疫联合讨论|485913d5-05e6-4c18-bf60-f49b1b57d66d|2025-11-07T17:00|PLANNED|https://meet.example.com/session/derm|系统性红斑狼疮皮肤损伤处理策略协调
