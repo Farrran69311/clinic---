@@ -1,1 +1,4 @@
 id|paymentId|insuranceType|coverageRatio|claimedAmount|approvedAmount|status|submittedAt|processedAt|notes
+claim-2025-0001|pay-2025-0001|PUBLIC|0.80|368.50|294.80|APPROVED|2025-10-28T09:25:00|2025-10-28T10:00:00|处方报销审核通过，按80%报销
+claim-2025-0002|pay-2025-0002|PUBLIC|0.70|120.00||SUBMITTED|2025-10-30T14:10:00||现场挂号费用待审核
+claim-2025-0003|pay-2025-0003|COMMERCIAL|0.60|256.90|0.00|REJECTED|2025-10-12T11:50:00|2025-10-13T09:05:00|票据缺失，驳回理赔

@@ -1,0 +1,8 @@
+fengrr@fengrrdeMacBook-Air clinic 实验 % javac -cp "mysql-connector-j-8.4.0.jar" -d out $(find src -name "*.java")
+fengrr@fengrrdeMacBook-Air clinic 实验 % java -cp "out:mysql-connector-j-8.4.0.jar" clinic.ClinicApp  
+账户：admin
+密码：admin123
+账户：doctor
+密码：doctor123
+账户：patient
+密码：patient23
