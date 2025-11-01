@@ -1,0 +1,31 @@
+id|title|hostDoctorId|scheduledAt|status|meetingUrl|notes
+d143d40e-7cb2-4f02-a3da-f12de4c1558d|呼吸科远程专家会诊|2b4936cb-089f-4379-92bd-82ab842c1688|2025-11-03T15:00|SCHEDULED|https://meet.example.com/session/respiratory|患者持续咳嗽，请会诊呼吸科专家
+7196009a-e392-4efd-9e65-2e9c827c5e74|骨科疑难病例讨论|580bd327-3564-4856-9a1b-fc301a7b3aa9|2025-10-28T19:30|COMPLETED|https://meet.example.com/session/orthopedic|术后康复方案评估
+d8c6ab3f-8531-4fef-9c9e-601a6f46b90e|神经内科会诊：TIA后管理|485913d5-05e6-4c18-bf60-f49b1b57d66d|2025-11-06T16:00|SCHEDULED|https://meet.example.com/session/neuro|患者短暂性脑缺血发作后制定二级预防方案
+8cb2a079-4b9d-4e4c-9ca3-b229b9c96589|皮肤免疫联合讨论|485913d5-05e6-4c18-bf60-f49b1b57d66d|2025-11-07T17:00|PLANNED|https://meet.example.com/session/derm|系统性红斑狼疮皮肤损伤处理策略协调
+035cc22c-ee3a-4b39-bea1-4f3b8cf795f0|神经内科 专家讨论会 5|7ad821a4-0b2f-4bb6-85a2-6be7a329a1f1|2025-11-06T15:05:01.025019|COMPLETED|https://meet.example.com/session/5|聚焦复杂病例的会诊与方案制定
+28275daf-de5b-4e68-9a87-93a609f82e82|肿瘤科 专家讨论会 6|acf0be0c-c851-41d4-bb51-51aa7da6d601|2025-11-07T16:05:01.030046|PLANNED|https://meet.example.com/session/6|聚焦复杂病例的会诊与方案制定
+5c40a6aa-16d1-4993-8888-095f90929f4c|内分泌科 专家讨论会 7|2ab7d795-2e4d-4c57-8b43-2d98dd7a9c18|2025-11-08T17:05:01.030635|SCHEDULED|https://meet.example.com/session/7|聚焦复杂病例的会诊与方案制定
+0efd4d29-e144-42c6-9c95-730157d65db2|康复科 专家讨论会 8|564fceb4-4ff0-4918-963f-1f5a2247fb4c|2025-11-09T14:05:01.031134|COMPLETED|https://meet.example.com/session/8|聚焦复杂病例的会诊与方案制定
+7a11da63-0ebf-4908-948c-fc35661a7764|全科 专家讨论会 9|2396508c-ac3f-4aee-9a37-f67097636543|2025-11-10T15:05:01.032115|PLANNED|https://meet.example.com/session/9|聚焦复杂病例的会诊与方案制定
+9f1013a9-3be1-4888-9418-8aa2e22eb71a|呼吸科 专家讨论会 10|43f280ca-1ec9-4073-98eb-c106ebc62ea7|2025-11-11T16:05:01.032649|SCHEDULED|https://meet.example.com/session/10|聚焦复杂病例的会诊与方案制定
+3261e37f-0710-48d7-8bad-6d094b4af554|儿科 专家讨论会 11|b24804b8-3ff5-4dc4-a912-637544805a92|2025-11-12T17:05:01.033605|COMPLETED|https://meet.example.com/session/11|聚焦复杂病例的会诊与方案制定
+467ca97c-159d-4b14-8875-5e4d58450506|内分泌科 专家讨论会 12|60b9b2c5-ab9f-44dd-abda-bc4fde815789|2025-11-13T14:05:01.034081|PLANNED|https://meet.example.com/session/12|聚焦复杂病例的会诊与方案制定
+9494eb50-cd9c-4a84-9de8-5b90064ad624|心内科 专家讨论会 13|009bd367-8530-4f43-b437-b467f66f6930|2025-11-14T15:05:01.034683|SCHEDULED|https://meet.example.com/session/13|聚焦复杂病例的会诊与方案制定
+55829952-7920-4089-bf29-163f49045e66|骨科 专家讨论会 14|ca096938-fff6-4738-aa4a-70ec95c944cd|2025-11-15T16:05:01.035199|COMPLETED|https://meet.example.com/session/14|聚焦复杂病例的会诊与方案制定
+135a28a0-2383-4ee9-9c13-376ba96b97b8|皮肤科 专家讨论会 15|6d0e9136-3f58-4a22-a2b0-7c68fe1a5d9c|2025-11-16T17:05:01.036020|PLANNED|https://meet.example.com/session/15|聚焦复杂病例的会诊与方案制定
+a5c45721-5299-478f-aa45-203b6bd3b9b9|神经内科 专家讨论会 16|afb8a4ae-dcea-47bd-b668-3596f7d5e49d|2025-11-17T14:05:01.036559|SCHEDULED|https://meet.example.com/session/16|聚焦复杂病例的会诊与方案制定
+3c450459-88e1-4892-bcdc-ff4512917438|肿瘤科 专家讨论会 17|b6688d47-8c06-4821-a29e-c28c827c8737|2025-11-18T15:05:01.037135|COMPLETED|https://meet.example.com/session/17|聚焦复杂病例的会诊与方案制定
+1cb83702-911f-4dc5-b822-190339eeb691|康复科 专家讨论会 18|4d705cc4-c6df-4626-8b21-30d04928e394|2025-11-19T16:05:01.037740|PLANNED|https://meet.example.com/session/18|聚焦复杂病例的会诊与方案制定
+8c17921a-bc91-4207-bbd8-d5e85787cf55|全科 专家讨论会 19|87db3859-6e28-401f-b035-6a8ca73057aa|2025-11-20T17:05:01.039110|SCHEDULED|https://meet.example.com/session/19|聚焦复杂病例的会诊与方案制定
+18742e6e-4c7f-468c-b48b-4b9c8e92fe44|呼吸科 专家讨论会 20|5fb1df65-761e-48ba-94a4-e21fc3bfb104|2025-11-01T14:05:01.039725|COMPLETED|https://meet.example.com/session/20|聚焦复杂病例的会诊与方案制定
+271005d7-85a5-4cc2-a4e6-5644105cdf2c|儿科 专家讨论会 21|9de08af5-77d3-4c97-ac02-399f93e90827|2025-11-02T15:05:01.040331|PLANNED|https://meet.example.com/session/21|聚焦复杂病例的会诊与方案制定
+c7d41461-1045-4065-88a8-ebf944381a7b|内分泌科 专家讨论会 22|88feaa54-4ce5-4944-874b-978a392ac0d5|2025-11-03T16:05:01.040943|SCHEDULED|https://meet.example.com/session/22|聚焦复杂病例的会诊与方案制定
+1c559f71-82fe-4581-8820-56b7fe142816|心内科 专家讨论会 23|dede2a9a-caf3-4356-81c1-e2edc5c6555c|2025-11-04T17:05:01.041599|COMPLETED|https://meet.example.com/session/23|聚焦复杂病例的会诊与方案制定
+e4a0e315-038b-4d0a-9463-f42674095501|骨科 专家讨论会 24|31e65942-1973-4025-bba0-c1c69fa21f53|2025-11-05T14:05:01.042678|PLANNED|https://meet.example.com/session/24|聚焦复杂病例的会诊与方案制定
+9a059d16-3b9a-4b80-bb5e-89c542929f11|皮肤科 专家讨论会 25|7bfcc966-0dbe-473c-8d88-96f141648295|2025-11-06T15:05:01.043395|SCHEDULED|https://meet.example.com/session/25|聚焦复杂病例的会诊与方案制定
+ad5ed8f7-b117-45df-844a-db0dccbab978|神经内科 专家讨论会 26|1418385d-e695-417a-9eee-c11cd11772c1|2025-11-07T16:05:01.044061|COMPLETED|https://meet.example.com/session/26|聚焦复杂病例的会诊与方案制定
+83eab664-4602-4828-a0c1-9d3afe50449a|肿瘤科 专家讨论会 27|4c7adb47-d540-488c-bc2d-9b1c9f50a64a|2025-11-08T17:05:01.044722|PLANNED|https://meet.example.com/session/27|聚焦复杂病例的会诊与方案制定
+d7ad71f4-6eac-441b-a9ea-225a82939027|康复科 专家讨论会 28|9ffcca62-f643-4ea1-9037-d6598ac1be0d|2025-11-09T14:05:01.045523|SCHEDULED|https://meet.example.com/session/28|聚焦复杂病例的会诊与方案制定
+f69077f9-552a-4c40-88dd-c72447e2df8d|全科 专家讨论会 29|6a305a49-b540-4016-907f-7297a22fa1cc|2025-11-10T15:05:01.046811|COMPLETED|https://meet.example.com/session/29|聚焦复杂病例的会诊与方案制定
+621ee9dc-7e6d-40b6-be0d-ef4e0d143656|全科 专家讨论会 30|2b4936cb-089f-4379-92bd-82ab842c1688|2025-11-11T16:05:01.047827|PLANNED|https://meet.example.com/session/30|聚焦复杂病例的会诊与方案制定
