@@ -37,7 +37,8 @@ public class ConsultationHistoryPanel extends JPanel implements Refreshable {
                 return false;
             }
         };
-        JTable table = new JTable(model);
+    JTable table = new JTable(model);
+    TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -50,13 +51,6 @@ public class ConsultationHistoryPanel extends JPanel implements Refreshable {
         refreshButton.addActionListener(e -> refreshData());
         top.add(refreshButton);
         add(top, BorderLayout.NORTH);
-
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting() && table.getSelectedRow() >= 0) {
-                String summary = model.getValueAt(table.getSelectedRow(), 2).toString();
-                JOptionPane.showMessageDialog(this, summary, "问诊摘要", JOptionPane.INFORMATION_MESSAGE);
-            }
-        });
 
         refreshData();
     }

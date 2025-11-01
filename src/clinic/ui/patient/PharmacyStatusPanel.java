@@ -40,7 +40,8 @@ public class PharmacyStatusPanel extends JPanel implements Refreshable {
                 return false;
             }
         };
-        JTable table = new JTable(model);
+    JTable table = new JTable(model);
+    TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));

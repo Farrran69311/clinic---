@@ -45,7 +45,8 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
                 return false;
             }
         };
-        table = new JTable(model);
+    table = new JTable(model);
+    TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -320,6 +321,7 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
                 }
             };
             participantTable = new JTable(participantModel);
+            TableUtils.installRowPreview(participantTable);
             add(new JScrollPane(participantTable), BorderLayout.CENTER);
 
             JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));

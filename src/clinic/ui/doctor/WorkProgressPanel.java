@@ -40,7 +40,8 @@ public class WorkProgressPanel extends JPanel implements Refreshable {
                 return false;
             }
         };
-        table = new JTable(model);
+    table = new JTable(model);
+    TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));

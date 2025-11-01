@@ -1,4 +1,2 @@
-id|patientId|sessionId|summary|recommendations|createdAt
-fcf7129b-6f47-4a4e-a6db-5c2f4b1cb174|16313661-88ec-4035-be37-540a75b4e4ee|d143d40e-7cb2-4f02-a3da-f12de4c1558d|专家评估为上呼吸道感染，需进一步排除过敏性咳嗽|保持室内湿度，按时雾化，三日内复诊并携带CT结果|2025-11-03T16:45
-8e42e036-6c6d-4e94-8e0e-44f2467a3bf0|9ed5026a-3334-46f0-b36a-92bfeb721c88|d8c6ab3f-8531-4fef-9c9e-601a6f46b90e|专家组建议加强抗血小板治疗并监测血压|启动阿司匹林长期治疗，安排颈动脉超声复查|2025-11-06T16:40
-5d6a0bfb-6f5f-4dd0-9d3d-4b3f9e561652|c4a7f5ab-d252-490a-9ade-6e0a812f05a7|8cb2a079-4b9d-4e4c-9ca3-b229b9c96589|皮肤免疫团队建议加强防晒并动态评估免疫抑制剂剂量|继续使用他克莫司软膏，每周复诊一次，检测肝肾功能|2025-11-07T17:45
+id|sessionId|patientId|doctorId|adviceDate|adviceSummary|followUpPlan
+7ad15637-d943-47e3-b832-0f9c5ad5fdd8|110101|16313661-88ec-4035-be37-540a75b4e4ee|李医生|2025-11-01|test|test

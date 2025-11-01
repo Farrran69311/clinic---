@@ -46,8 +46,10 @@ public class MedicineManagementPanel extends JPanel implements Refreshable {
             }
         };
 
-        medicineTable = new JTable(medicineModel);
-        prescriptionTable = new JTable(prescriptionModel);
+    medicineTable = new JTable(medicineModel);
+    TableUtils.installRowPreview(medicineTable);
+    prescriptionTable = new JTable(prescriptionModel);
+    TableUtils.installRowPreview(prescriptionTable);
 
         JPanel medicinePanel = new JPanel(new BorderLayout());
         JPanel medicineHeader = new JPanel(new FlowLayout(FlowLayout.LEFT));

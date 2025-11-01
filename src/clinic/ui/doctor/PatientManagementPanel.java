@@ -34,7 +34,8 @@ public class PatientManagementPanel extends JPanel implements Refreshable {
                 return false;
             }
         };
-        table = new JTable(model);
+    table = new JTable(model);
+    TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
