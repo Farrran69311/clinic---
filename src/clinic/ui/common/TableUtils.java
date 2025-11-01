@@ -61,7 +61,10 @@ public final class TableUtils {
         if (Boolean.TRUE.equals(table.getClientProperty("clinic.rowPreview"))) {
             return;
         }
-        ToolTipManager.sharedInstance().registerComponent(table);
+        ToolTipManager manager = ToolTipManager.sharedInstance();
+        manager.registerComponent(table);
+        manager.setInitialDelay(Math.min(manager.getInitialDelay(), 250));
+        manager.setDismissDelay(Math.max(manager.getDismissDelay(), 8000));
         table.addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
@@ -78,10 +81,12 @@ public final class TableUtils {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2 && !e.isConsumed()) {
-                    int viewRow = table.getSelectedRow();
-                    if (viewRow >= 0) {
-                        showDetailDialog(table, viewRow);
+                    int viewRow = table.rowAtPoint(e.getPoint());
+                    if (viewRow < 0) {
+                        return;
                     }
+                    table.setRowSelectionInterval(viewRow, viewRow);
+                    showDetailDialog(table, viewRow);
                 }
             }
         });

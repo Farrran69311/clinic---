@@ -5,6 +5,7 @@ import clinic.model.Medicine;
 import clinic.model.Prescription;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -30,8 +31,9 @@ public class MedicineManagementPanel extends JPanel implements Refreshable {
     private final JTable prescriptionTable;
 
     public MedicineManagementPanel(AppContext context) {
-        this.context = context;
-        setLayout(new BorderLayout(10, 10));
+    this.context = context;
+    setLayout(new BorderLayout(10, 10));
+    UIUtils.applyPagePadding(this);
 
         medicineModel = new DefaultTableModel(new String[]{"编号", "名称", "规格", "库存", "单位", "有效期"}, 0) {
             @Override
@@ -45,14 +47,16 @@ public class MedicineManagementPanel extends JPanel implements Refreshable {
                 return false;
             }
         };
-
-    medicineTable = new JTable(medicineModel);
-    TableUtils.installRowPreview(medicineTable);
-    prescriptionTable = new JTable(prescriptionModel);
-    TableUtils.installRowPreview(prescriptionTable);
+        medicineTable = new JTable(medicineModel);
+        medicineTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(medicineTable);
+        prescriptionTable = new JTable(prescriptionModel);
+        prescriptionTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(prescriptionTable);
 
         JPanel medicinePanel = new JPanel(new BorderLayout());
         JPanel medicineHeader = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(medicineHeader);
         medicineHeader.add(new JLabel("药品库存"));
         medicineHeader.add(new JLabel("搜索:"));
         JTextField medicineSearch = new JTextField(14);
@@ -74,6 +78,7 @@ public class MedicineManagementPanel extends JPanel implements Refreshable {
 
         JPanel prescriptionPanel = new JPanel(new BorderLayout());
         JPanel prescriptionHeader = new JPanel(new FlowLayout(FlowLayout.LEFT));
+    UIUtils.applyHeaderSpacing(prescriptionHeader);
         prescriptionHeader.add(new JLabel("处方任务"));
         prescriptionHeader.add(new JLabel("搜索:"));
         JTextField prescriptionSearch = new JTextField(14);

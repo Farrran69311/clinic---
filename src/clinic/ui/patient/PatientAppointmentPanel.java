@@ -6,6 +6,7 @@ import clinic.model.Doctor;
 import clinic.model.User;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -34,6 +35,7 @@ public class PatientAppointmentPanel extends JPanel implements Refreshable {
         this.context = context;
         this.user = user;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "医生", "时间", "状态", "备注"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -41,10 +43,12 @@ public class PatientAppointmentPanel extends JPanel implements Refreshable {
             }
         };
     table = new JTable(model);
-    TableUtils.installRowPreview(table);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(top);
         top.add(new JLabel("我的预约"));
         top.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);

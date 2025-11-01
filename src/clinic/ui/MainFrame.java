@@ -75,6 +75,8 @@ public class MainFrame extends JFrame {
 
     private JPanel buildPatientTabs() {
         JTabbedPane tabs = new JTabbedPane();
+        WelcomePanel welcomePanel = new WelcomePanel(context, user);
+        registerTab(tabs, "首页概览", welcomePanel);
         PatientDepartmentBookingPanel departmentPanel = new PatientDepartmentBookingPanel(context, user);
         registerTab(tabs, "科室预约", departmentPanel);
         PatientAppointmentPanel appointmentPanel = new PatientAppointmentPanel(context, user);
@@ -98,6 +100,8 @@ public class MainFrame extends JFrame {
 
     private JPanel buildDoctorTabs() {
         JTabbedPane tabs = new JTabbedPane();
+        WelcomePanel welcomePanel = new WelcomePanel(context, user);
+        registerTab(tabs, "首页概览", welcomePanel);
         PatientManagementPanel patientPanel = new PatientManagementPanel(context);
         registerTab(tabs, "患者管理", patientPanel);
         AppointmentManagementPanel appointmentPanel = new AppointmentManagementPanel(context);

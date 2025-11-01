@@ -162,7 +162,7 @@ public class InsightService {
             .collect(Collectors.toList());
 
         List<ExpertAdvice> adviceItems = expertAdviceService.listAll().stream()
-            .filter(item -> doctorId.equals(item.getDoctorId()))
+            .filter(item -> matchesDoctor(item.getDoctorId(), doctor))
             .filter(item -> item.getAdviceDate() != null)
             .filter(item -> !item.getAdviceDate().isBefore(start) && !item.getAdviceDate().isAfter(end))
             .collect(Collectors.toList());
@@ -171,6 +171,9 @@ public class InsightService {
             .filter(item -> doctorId.equals(item.getDoctorId()))
             .filter(item -> isWithin(item.getCreatedAt(), start, end))
             .collect(Collectors.toList());
+
+        Map<String, String> patientNames = patientService.listPatients().stream()
+            .collect(Collectors.toMap(Patient::getId, Patient::getName));
 
         StringBuilder builder = new StringBuilder();
         builder.append("医生周报\n------------------------------\n");
@@ -197,7 +200,7 @@ public class InsightService {
                 .forEach(item -> builder.append("  · ")
                     .append(item.getLastUpdated())
                     .append(" ｜ 患者 ")
-                    .append(item.getPatientId())
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
                     .append(" ｜ ")
                     .append(item.getDescription())
                     .append(" (状态: ")
@@ -217,7 +220,7 @@ public class InsightService {
                 .forEach(item -> builder.append("- ")
                     .append(DATE_TIME_FORMATTER.format(item.getCreatedAt()))
                     .append(" ｜ 患者 ")
-                    .append(item.getPatientId())
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
                     .append(" ｜ ")
                     .append(snippet(item.getSummary()))
                     .append("\n"));
@@ -233,7 +236,7 @@ public class InsightService {
                 .forEach(item -> builder.append("- ")
                     .append(item.getAdviceDate())
                     .append(" ｜ 患者 ")
-                    .append(item.getPatientId())
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
                     .append(" ｜ ")
                     .append(snippet(item.getAdviceSummary()))
                     .append("\n"));
@@ -305,5 +308,32 @@ public class InsightService {
             return "当前任务均已完成，可安排巩固随访";
         }
         return "暂无明确建议";
+    }
+
+    private boolean matchesDoctor(String candidate, Doctor doctor) {
+        if (candidate == null || candidate.isBlank()) {
+            return false;
+        }
+        String trimmed = candidate.trim();
+        if (doctor.getId().equals(trimmed)) {
+            return true;
+        }
+        if (doctor.getName().equals(trimmed)) {
+            return true;
+        }
+        String normalizedDoctor = normalizeDoctorName(doctor.getName());
+        String normalizedCandidate = normalizeDoctorName(trimmed);
+        return !normalizedDoctor.isBlank() && normalizedDoctor.equalsIgnoreCase(normalizedCandidate);
+    }
+
+    private String normalizeDoctorName(String name) {
+        if (name == null) {
+            return "";
+        }
+        return name.endsWith("医生") ? name.substring(0, name.length() - 2) : name;
+    }
+
+    private String resolvePatientName(Map<String, String> names, String id) {
+        return names.getOrDefault(id, id);
     }
 }

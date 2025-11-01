@@ -5,6 +5,7 @@ import clinic.model.ExpertAdvice;
 import clinic.model.User;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -27,6 +28,7 @@ public class PatientExpertAdvicePanel extends JPanel implements Refreshable {
         this.context = context;
         this.user = user;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"建议编号", "会诊编号", "建议日期", "建议概要", "随访计划"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -34,9 +36,12 @@ public class PatientExpertAdvicePanel extends JPanel implements Refreshable {
             }
         };
         JTable table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
         header.add(new JLabel("专家建议"));
         header.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);
@@ -46,16 +51,6 @@ public class PatientExpertAdvicePanel extends JPanel implements Refreshable {
         refreshButton.addActionListener(e -> refreshData());
         header.add(refreshButton);
         add(header, BorderLayout.NORTH);
-
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting() && table.getSelectedRow() >= 0) {
-                String summary = model.getValueAt(table.getSelectedRow(), 3).toString();
-                String followUp = model.getValueAt(table.getSelectedRow(), 4).toString();
-                JOptionPane.showMessageDialog(this,
-                    "建议概要:\n" + summary + "\n\n随访计划:\n" + followUp,
-                    "专家建议详情", JOptionPane.INFORMATION_MESSAGE);
-            }
-        });
 
         refreshData();
     }

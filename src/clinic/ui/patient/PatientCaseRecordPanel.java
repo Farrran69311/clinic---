@@ -5,6 +5,7 @@ import clinic.model.CaseRecord;
 import clinic.model.User;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -27,6 +28,7 @@ public class PatientCaseRecordPanel extends JPanel implements Refreshable {
         this.context = context;
         this.user = user;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "标题", "标签", "摘要", "附件"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -34,9 +36,12 @@ public class PatientCaseRecordPanel extends JPanel implements Refreshable {
             }
         };
         JTable table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
         header.add(new JLabel("个人病例"));
         header.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);
@@ -46,13 +51,6 @@ public class PatientCaseRecordPanel extends JPanel implements Refreshable {
         refreshButton.addActionListener(e -> refreshData());
         header.add(refreshButton);
         add(header, BorderLayout.NORTH);
-
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting() && table.getSelectedRow() >= 0) {
-                String summary = model.getValueAt(table.getSelectedRow(), 3).toString();
-                JOptionPane.showMessageDialog(this, summary, "病例摘要", JOptionPane.INFORMATION_MESSAGE);
-            }
-        });
 
         refreshData();
     }

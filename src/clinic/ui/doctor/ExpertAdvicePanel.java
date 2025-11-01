@@ -1,10 +1,12 @@
 package clinic.ui.doctor;
 
 import clinic.AppContext;
+import clinic.model.Doctor;
 import clinic.model.ExpertAdvice;
 import clinic.model.Patient;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -33,16 +35,20 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
     public ExpertAdvicePanel(AppContext context) {
         this.context = context;
         setLayout(new BorderLayout(10, 10));
-        model = new DefaultTableModel(new String[]{"编号", "患者", "会诊", "建议日期", "建议概要", "随访计划"}, 0) {
+        UIUtils.applyPagePadding(this);
+        model = new DefaultTableModel(new String[]{"编号", "患者", "医生", "会诊", "建议日期", "建议概要", "随访计划"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
         table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
         header.add(new JLabel("专家建议"));
         header.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);
@@ -74,10 +80,12 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
         model.setRowCount(0);
         try {
             Map<String, String> patientNames = buildPatientNames();
+            Map<String, String> doctorNames = buildDoctorNames();
             for (ExpertAdvice advice : context.getExpertAdviceService().listAll()) {
                 model.addRow(new Object[]{
                     advice.getId(),
                     patientNames.getOrDefault(advice.getPatientId(), advice.getPatientId()),
+                    doctorNames.getOrDefault(advice.getDoctorId(), advice.getDoctorId()),
                     advice.getSessionId(),
                     advice.getAdviceDate(),
                     advice.getAdviceSummary(),
@@ -92,16 +100,17 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
     private void createAdvice() {
         try {
             List<Patient> patients = context.getPatientService().listPatients();
+            List<Doctor> doctors = context.getDoctorService().listDoctors();
             if (patients.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "暂无患者信息", "提示", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
-            AdviceForm form = new AdviceForm(patients);
+            AdviceForm form = new AdviceForm(patients, doctors);
             if (form.showDialog(this, "新增建议")) {
                 context.getExpertAdviceService().createAdvice(
                     form.sessionField.getText().trim().isEmpty() ? null : form.sessionField.getText().trim(),
                     form.resolvePatientId(),
-                    form.doctorField.getText().trim().isEmpty() ? null : form.doctorField.getText().trim(),
+                    form.resolveDoctorId(),
                     form.parseDate(),
                     form.summaryField.getText().trim(),
                     form.followUpField.getText().trim()
@@ -129,11 +138,12 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
                 return;
             }
             List<Patient> patients = context.getPatientService().listPatients();
-            AdviceForm form = new AdviceForm(patients);
+            List<Doctor> doctors = context.getDoctorService().listDoctors();
+            AdviceForm form = new AdviceForm(patients, doctors);
             ExpertAdvice advice = optional.get();
             form.setPatient(advice.getPatientId());
             form.sessionField.setText(advice.getSessionId() == null ? "" : advice.getSessionId());
-            form.doctorField.setText(advice.getDoctorId() == null ? "" : advice.getDoctorId());
+            form.setDoctor(advice.getDoctorId());
             form.dateField.setText(advice.getAdviceDate() == null ? "" : advice.getAdviceDate().toString());
             form.summaryField.setText(advice.getAdviceSummary());
             form.followUpField.setText(advice.getFollowUpPlan());
@@ -142,7 +152,7 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
                     advice.getId(),
                     form.sessionField.getText().trim().isEmpty() ? null : form.sessionField.getText().trim(),
                     form.resolvePatientId(),
-                    form.doctorField.getText().trim().isEmpty() ? null : form.doctorField.getText().trim(),
+                    form.resolveDoctorId(),
                     form.parseDate(),
                     form.summaryField.getText().trim(),
                     form.followUpField.getText().trim()
@@ -179,25 +189,41 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
         return map;
     }
 
+    private Map<String, String> buildDoctorNames() throws IOException {
+        Map<String, String> map = new HashMap<>();
+        for (Doctor doctor : context.getDoctorService().listDoctors()) {
+            map.put(doctor.getId(), doctor.getName());
+            map.putIfAbsent(doctor.getName(), doctor.getName());
+        }
+        return map;
+    }
+
     private static class AdviceForm {
         final List<Patient> patients;
+        final List<Doctor> doctors;
         final JComboBox<String> patientCombo;
+        final JComboBox<String> doctorCombo;
         final JTextField sessionField = new JTextField();
-        final JTextField doctorField = new JTextField();
         final JTextField dateField = new JTextField(LocalDate.now().toString());
         final JTextField summaryField = new JTextField();
         final JTextField followUpField = new JTextField();
 
-        AdviceForm(List<Patient> patients) {
+        AdviceForm(List<Patient> patients, List<Doctor> doctors) {
             this.patients = patients;
+            this.doctors = doctors;
             patientCombo = new JComboBox<>(patients.stream().map(Patient::getName).toArray(String[]::new));
+            doctorCombo = new JComboBox<>();
+            doctorCombo.addItem("(不指定)");
+            for (Doctor doctor : doctors) {
+                doctorCombo.addItem(doctor.getName());
+            }
         }
 
         boolean showDialog(JPanel parent, String title) {
             Object[] message = {
                 "患者", patientCombo,
                 "会诊编号", sessionField,
-                "医生编号", doctorField,
+                "责任医生", doctorCombo,
                 "建议日期 (YYYY-MM-DD)", dateField,
                 "建议概要", summaryField,
                 "随访计划", followUpField
@@ -210,6 +236,14 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
                 throw new IllegalArgumentException("请选择患者");
             }
             return patients.get(patientCombo.getSelectedIndex()).getId();
+        }
+
+        String resolveDoctorId() {
+            int index = doctorCombo.getSelectedIndex();
+            if (index <= 0 || doctors.isEmpty()) {
+                return null;
+            }
+            return doctors.get(index - 1).getId();
         }
 
         LocalDate parseDate() {
@@ -225,12 +259,30 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
         }
 
         void setPatient(String patientId) {
+            if (patientId == null) {
+                return;
+            }
             for (int i = 0; i < patients.size(); i++) {
                 if (patients.get(i).getId().equals(patientId)) {
                     patientCombo.setSelectedIndex(i);
-                    break;
+                    return;
                 }
             }
+        }
+
+        void setDoctor(String doctorId) {
+            if (doctorId == null || doctors.isEmpty()) {
+                doctorCombo.setSelectedIndex(0);
+                return;
+            }
+            for (int i = 0; i < doctors.size(); i++) {
+                Doctor doctor = doctors.get(i);
+                if (doctor.getId().equals(doctorId) || doctor.getName().equals(doctorId)) {
+                    doctorCombo.setSelectedIndex(i + 1);
+                    return;
+                }
+            }
+            doctorCombo.setSelectedIndex(0);
         }
     }
 }

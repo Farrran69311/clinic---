@@ -6,6 +6,7 @@ import clinic.model.Doctor;
 import clinic.model.User;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -47,6 +48,7 @@ public class PatientDepartmentBookingPanel extends JPanel implements Refreshable
         this.context = context;
         this.user = user;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
 
         model = new DefaultTableModel(new String[]{
             "编号", "医生", "科室", "职称", "级别", "评分", "擅长领域", "预约数量", "最近预约", "出诊时间"
@@ -57,6 +59,8 @@ public class PatientDepartmentBookingPanel extends JPanel implements Refreshable
             }
         };
         table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         TableUtils.installSearchFilter(table, searchField);
         table.getColumnModel().getColumn(0).setMinWidth(0);
         table.getColumnModel().getColumn(0).setMaxWidth(0);
@@ -71,6 +75,7 @@ public class PatientDepartmentBookingPanel extends JPanel implements Refreshable
 
     private JPanel buildTopBar() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(panel);
         panel.add(new JLabel("科室:"));
         panel.add(departmentCombo);
         departmentCombo.addActionListener(e -> refreshTable());

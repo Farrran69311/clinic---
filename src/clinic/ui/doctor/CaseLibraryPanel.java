@@ -5,6 +5,7 @@ import clinic.model.CaseRecord;
 import clinic.model.Patient;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -31,17 +32,20 @@ public class CaseLibraryPanel extends JPanel implements Refreshable {
     public CaseLibraryPanel(AppContext context) {
         this.context = context;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "患者", "标题", "标签", "附件", "摘要"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
-    table = new JTable(model);
-    TableUtils.installRowPreview(table);
+        table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
         header.add(new JLabel("病例库"));
         header.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);

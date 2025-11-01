@@ -6,6 +6,7 @@ import clinic.model.Doctor;
 import clinic.model.User;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -30,6 +31,7 @@ public class PatientSchedulePanel extends JPanel implements Refreshable {
         this.context = context;
         this.user = user;
         setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "标题", "开始时间", "结束时间", "责任医生", "地点", "备注"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -37,9 +39,12 @@ public class PatientSchedulePanel extends JPanel implements Refreshable {
             }
         };
         JTable table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
         header.add(new JLabel("个人日程"));
         header.add(new JLabel("搜索:"));
         JTextField searchField = new JTextField(18);
@@ -49,13 +54,6 @@ public class PatientSchedulePanel extends JPanel implements Refreshable {
         refreshButton.addActionListener(e -> refreshData());
         header.add(refreshButton);
         add(header, BorderLayout.NORTH);
-
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting() && table.getSelectedRow() >= 0) {
-                String notes = model.getValueAt(table.getSelectedRow(), 6).toString();
-                JOptionPane.showMessageDialog(this, notes.isEmpty() ? "暂无备注" : notes, "日程备注", JOptionPane.INFORMATION_MESSAGE);
-            }
-        });
 
         refreshData();
     }
