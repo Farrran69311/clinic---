@@ -1,1 +1,3 @@
 id|sessionId|patientId|doctorId|adviceDate|adviceSummary|followUpPlan
+4f965d2b-2c2d-47f7-9f8a-9ff5b77d5d27|d143d40e-7cb2-4f02-a3da-f12de4c1558d|16313661-88ec-4035-be37-540a75b4e4ee|2b4936cb-089f-4379-92bd-82ab842c1688|2025-11-03|会诊建议继续雾化治疗并完善胸部CT检查，注意夜间症状记录。|安排一周后复诊，上传夜间咳嗽监测表。
+5e2f642d-7e59-4d67-a212-22f2d56f0c3e|d143d40e-7cb2-4f02-a3da-f12de4c1558d|84267b92-7ce6-43f3-aaad-b033c537c64d|2b4936cb-089f-4379-92bd-82ab842c1688|2025-11-03|专家组建议关注情绪触发因素，开展失眠认知行为治疗并安排心理随访。|每晚记录情绪与睡眠，三周后回访心理门诊。
