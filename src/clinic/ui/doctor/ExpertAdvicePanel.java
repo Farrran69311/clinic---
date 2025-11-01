@@ -4,6 +4,7 @@ import clinic.AppContext;
 import clinic.model.Doctor;
 import clinic.model.ExpertAdvice;
 import clinic.model.Patient;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -25,15 +26,19 @@ import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 public class ExpertAdvicePanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, ExpertAdvice> adviceIndex = new HashMap<>();
 
-    public ExpertAdvicePanel(AppContext context) {
+    public ExpertAdvicePanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "患者", "医生", "会诊", "建议日期", "建议概要", "随访计划"}, 0) {
@@ -79,9 +84,11 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
     public void refreshData() {
         model.setRowCount(0);
         try {
+            adviceIndex.clear();
             Map<String, String> patientNames = buildPatientNames();
             Map<String, String> doctorNames = buildDoctorNames();
             for (ExpertAdvice advice : context.getExpertAdviceService().listAll()) {
+                adviceIndex.put(advice.getId(), advice);
                 model.addRow(new Object[]{
                     advice.getId(),
                     patientNames.getOrDefault(advice.getPatientId(), advice.getPatientId()),
@@ -107,10 +114,14 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
             }
             AdviceForm form = new AdviceForm(patients, doctors);
             if (form.showDialog(this, "新增建议")) {
+                String doctorId = form.resolveDoctorId();
+                if (doctorId != null && !permissionGuard.ensureDoctorAccess(this, doctorId, "新增专家建议")) {
+                    return;
+                }
                 context.getExpertAdviceService().createAdvice(
                     form.sessionField.getText().trim().isEmpty() ? null : form.sessionField.getText().trim(),
                     form.resolvePatientId(),
-                    form.resolveDoctorId(),
+                    doctorId,
                     form.parseDate(),
                     form.summaryField.getText().trim(),
                     form.followUpField.getText().trim()
@@ -141,6 +152,9 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
             List<Doctor> doctors = context.getDoctorService().listDoctors();
             AdviceForm form = new AdviceForm(patients, doctors);
             ExpertAdvice advice = optional.get();
+            if (advice.getDoctorId() != null && !permissionGuard.ensureDoctorAccess(this, advice.getDoctorId(), "编辑专家建议")) {
+                return;
+            }
             form.setPatient(advice.getPatientId());
             form.sessionField.setText(advice.getSessionId() == null ? "" : advice.getSessionId());
             form.setDoctor(advice.getDoctorId());
@@ -148,11 +162,16 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
             form.summaryField.setText(advice.getAdviceSummary());
             form.followUpField.setText(advice.getFollowUpPlan());
             if (form.showDialog(this, "编辑建议")) {
+                String doctorId = form.resolveDoctorId();
+                if (doctorId != null && !Objects.equals(doctorId, advice.getDoctorId())
+                    && !permissionGuard.ensureDoctorAccess(this, doctorId, "调整建议责任医生")) {
+                    return;
+                }
                 ExpertAdvice updated = new ExpertAdvice(
                     advice.getId(),
                     form.sessionField.getText().trim().isEmpty() ? null : form.sessionField.getText().trim(),
                     form.resolvePatientId(),
-                    form.resolveDoctorId(),
+                    doctorId,
                     form.parseDate(),
                     form.summaryField.getText().trim(),
                     form.followUpField.getText().trim()
@@ -173,6 +192,11 @@ public class ExpertAdvicePanel extends JPanel implements Refreshable {
         }
         if (JOptionPane.showConfirmDialog(this, "确认删除该建议?", "确认", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
             try {
+                ExpertAdvice advice = adviceIndex.get(model.getValueAt(row, 0).toString());
+                if (advice != null && advice.getDoctorId() != null
+                    && !permissionGuard.ensureDoctorAccess(this, advice.getDoctorId(), "删除专家建议")) {
+                    return;
+                }
                 context.getExpertAdviceService().deleteAdvice(model.getValueAt(row, 0).toString());
                 refreshData();
             } catch (IOException ex) {

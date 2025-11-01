@@ -6,6 +6,7 @@ import clinic.model.Doctor;
 import clinic.model.ExpertAdvice;
 import clinic.model.Patient;
 import clinic.model.WorkProgress;
+import clinic.util.DoctorMatcher;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -156,19 +157,19 @@ public class InsightService {
         LocalDate start = end.minusDays(6);
 
         List<WorkProgress> progressItems = workProgressService.listAll().stream()
-            .filter(item -> doctorId.equals(item.getOwnerDoctorId()))
+            .filter(item -> DoctorMatcher.matches(item.getOwnerDoctorId(), doctor))
             .filter(item -> item.getLastUpdated() != null)
             .filter(item -> !item.getLastUpdated().isBefore(start) && !item.getLastUpdated().isAfter(end))
             .collect(Collectors.toList());
 
         List<ExpertAdvice> adviceItems = expertAdviceService.listAll().stream()
-            .filter(item -> matchesDoctor(item.getDoctorId(), doctor))
+            .filter(item -> DoctorMatcher.matches(item.getDoctorId(), doctor))
             .filter(item -> item.getAdviceDate() != null)
             .filter(item -> !item.getAdviceDate().isBefore(start) && !item.getAdviceDate().isAfter(end))
             .collect(Collectors.toList());
 
         List<Consultation> consultationItems = consultationService.listConsultations().stream()
-            .filter(item -> doctorId.equals(item.getDoctorId()))
+            .filter(item -> DoctorMatcher.matches(item.getDoctorId(), doctor))
             .filter(item -> isWithin(item.getCreatedAt(), start, end))
             .collect(Collectors.toList());
 
@@ -191,6 +192,8 @@ public class InsightService {
         if (!progressItems.isEmpty()) {
             Map<String, Long> statusCounts = progressItems.stream()
                 .collect(Collectors.groupingBy(item -> normalize(item.getStatus()), Collectors.counting()));
+            Optional<WorkProgress> latestProgress = progressItems.stream()
+                .max(Comparator.comparing(WorkProgress::getLastUpdated));
             builder.append("工作进度统计\n------------------------------\n");
             builder.append("累计处理患者: ").append(countDistinctPatients(progressItems)).append(" 名\n");
             statusCounts.forEach((status, count) -> builder.append("- ").append(status).append(": ").append(count).append(" 项\n"));
@@ -206,9 +209,7 @@ public class InsightService {
                     .append(" (状态: ")
                     .append(item.getStatus())
                     .append(")\n"));
-            builder.append("建议: ").append(progressFollowUpSuggestion(statusCounts, progressItems.stream()
-                .filter(p -> p.getLastUpdated() != null)
-                .max(Comparator.comparing(WorkProgress::getLastUpdated)))).append("\n\n");
+            builder.append("建议: ").append(progressFollowUpSuggestion(statusCounts, latestProgress)).append("\n\n");
         }
 
         if (!consultationItems.isEmpty()) {
@@ -308,29 +309,6 @@ public class InsightService {
             return "当前任务均已完成，可安排巩固随访";
         }
         return "暂无明确建议";
-    }
-
-    private boolean matchesDoctor(String candidate, Doctor doctor) {
-        if (candidate == null || candidate.isBlank()) {
-            return false;
-        }
-        String trimmed = candidate.trim();
-        if (doctor.getId().equals(trimmed)) {
-            return true;
-        }
-        if (doctor.getName().equals(trimmed)) {
-            return true;
-        }
-        String normalizedDoctor = normalizeDoctorName(doctor.getName());
-        String normalizedCandidate = normalizeDoctorName(trimmed);
-        return !normalizedDoctor.isBlank() && normalizedDoctor.equalsIgnoreCase(normalizedCandidate);
-    }
-
-    private String normalizeDoctorName(String name) {
-        if (name == null) {
-            return "";
-        }
-        return name.endsWith("医生") ? name.substring(0, name.length() - 2) : name;
     }
 
     private String resolvePatientName(Map<String, String> names, String id) {

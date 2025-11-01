@@ -6,6 +6,7 @@ import clinic.model.Consultation;
 import clinic.model.Doctor;
 import clinic.model.Medicine;
 import clinic.model.Patient;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -23,18 +24,22 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import java.util.HashMap;
+
 public class ConsultationManagementPanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, Consultation> consultationIndex = new HashMap<>();
 
-    public ConsultationManagementPanel(AppContext context) {
+    public ConsultationManagementPanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "患者", "医生", "预约", "摘要", "时间"}, 0) {
@@ -83,6 +88,7 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
     public void refreshData() {
         model.setRowCount(0);
         try {
+            consultationIndex.clear();
             Map<String, String> patientNames = new HashMap<>();
             for (Patient patient : context.getPatientService().listPatients()) {
                 patientNames.put(patient.getId(), patient.getName());
@@ -96,6 +102,7 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
                 appointmentDesc.put(appointment.getId(), appointment.getDateTime().toString());
             }
             for (Consultation consultation : context.getConsultationService().listConsultations()) {
+                consultationIndex.put(consultation.getId(), consultation);
                 model.addRow(new Object[]{
                     consultation.getId(),
                     patientNames.getOrDefault(consultation.getPatientId(), consultation.getPatientId()),
@@ -138,6 +145,9 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
             if (option == JOptionPane.OK_OPTION) {
                 String patientId = patients.get(patientCombo.getSelectedIndex()).getId();
                 String doctorId = doctors.get(doctorCombo.getSelectedIndex()).getId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "新增问诊")) {
+                    return;
+                }
                 String appointmentId = filteredAppointments.isEmpty() ? null : filteredAppointments.get(appointmentCombo.getSelectedIndex()).getId();
                 context.getConsultationService().createConsultation(
                     patientId,
@@ -160,28 +170,34 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
             return;
         }
         String id = model.getValueAt(row, 0).toString();
-        String summary = model.getValueAt(row, 4).toString();
-        JTextArea area = new JTextArea(summary, 6, 20);
-        int option = JOptionPane.showConfirmDialog(this, new JScrollPane(area), "编辑问诊摘要", JOptionPane.OK_CANCEL_OPTION);
-        if (option == JOptionPane.OK_OPTION) {
-            try {
-                Consultation target = context.getConsultationService().listConsultations().stream()
+        Consultation consultation = consultationIndex.get(id);
+        try {
+            if (consultation == null) {
+                consultation = context.getConsultationService().listConsultations().stream()
                     .filter(c -> c.getId().equals(id))
                     .findFirst()
-                    .orElseThrow();
+                    .orElse(null);
+            }
+            if (consultation != null && !permissionGuard.ensureDoctorAccess(this, consultation.getDoctorId(), "编辑问诊")) {
+                return;
+            }
+            String summary = model.getValueAt(row, 4).toString();
+            JTextArea area = new JTextArea(summary, 6, 20);
+            int option = JOptionPane.showConfirmDialog(this, new JScrollPane(area), "编辑问诊摘要", JOptionPane.OK_CANCEL_OPTION);
+            if (option == JOptionPane.OK_OPTION && consultation != null) {
                 context.getConsultationService().updateConsultation(new Consultation(
-                    target.getId(),
-                    target.getPatientId(),
-                    target.getDoctorId(),
-                    target.getAppointmentId(),
+                    consultation.getId(),
+                    consultation.getPatientId(),
+                    consultation.getDoctorId(),
+                    consultation.getAppointmentId(),
                     area.getText().trim(),
-                    target.getPrescriptionId(),
-                    target.getCreatedAt()
+                    consultation.getPrescriptionId(),
+                    consultation.getCreatedAt()
                 ));
                 refreshData();
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -194,6 +210,10 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
         int confirm = JOptionPane.showConfirmDialog(this, "确认删除该记录?", "确认", JOptionPane.OK_CANCEL_OPTION);
         if (confirm == JOptionPane.OK_OPTION) {
             try {
+                Consultation consultation = consultationIndex.get(model.getValueAt(row, 0).toString());
+                if (consultation != null && !permissionGuard.ensureDoctorAccess(this, consultation.getDoctorId(), "删除问诊")) {
+                    return;
+                }
                 context.getConsultationService().deleteConsultation(model.getValueAt(row, 0).toString());
                 refreshData();
             } catch (IOException ex) {
@@ -210,6 +230,10 @@ public class ConsultationManagementPanel extends JPanel implements Refreshable {
         }
         String consultationId = model.getValueAt(row, 0).toString();
         try {
+            Consultation consultation = consultationIndex.get(consultationId);
+            if (consultation != null && !permissionGuard.ensureDoctorAccess(this, consultation.getDoctorId(), "开立处方")) {
+                return;
+            }
             List<Medicine> medicines = context.getPharmacyService().listMedicines();
             if (medicines.isEmpty()) {
                 JOptionPane.showMessageDialog(this, "请先添加药品库存", "提示", JOptionPane.INFORMATION_MESSAGE);

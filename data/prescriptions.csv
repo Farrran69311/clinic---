@@ -5,3 +5,5 @@ id|consultationId|medicineId|quantity|usage|status
 d95c4cda-9b47-4d3e-8b24-52d3f7eb4cd5|4f0f6bcb-1f0c-4ad5-9e37-9ea5f21d4c9d|df224f37-3165-4e3a-9a25-17f05a2f7f3a|1|晚餐后口服1片，连续30日，监测空腹血糖|ACTIVE
 e5c645c8-48de-4d82-9039-8570bd4e9985|55ab6f87-e0c0-4f8f-9015-21827d14c3df|f3dc4c6d-2c62-4fd5-bf8e-01b0b99b7a74|1|每日早餐后口服1片，长期服用，定期复查凝血功能|PLANNED
 af2f5b0d-8d71-4254-9ea6-4eac9b33d7e6|b3ab9953-f55d-4e28-b2b1-34dc257a3df4|fa9de9c1-5027-4470-9b5c-8d6ff9b4d7f1|2|每日早晚各冲服一袋，配合高蛋白饮食|ACTIVE
+613ec8c7-4514-40fa-aba3-73b7a69907b7|0f950a51-dd5f-4539-93ed-f2b2f06a562d|57d79fb0-e0a0-4add-a99c-93863448a080|1|ok|PENDING
+f8c9bdb2-ffb2-45ef-a6d3-ecb56b9158a5|0f950a51-dd5f-4539-93ed-f2b2f06a562d|57d79fb0-e0a0-4add-a99c-93863448a080|1|ok|PENDING

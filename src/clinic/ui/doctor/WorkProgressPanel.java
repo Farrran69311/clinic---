@@ -4,6 +4,7 @@ import clinic.AppContext;
 import clinic.model.Doctor;
 import clinic.model.Patient;
 import clinic.model.WorkProgress;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -22,18 +23,23 @@ import java.awt.FlowLayout;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
+import java.util.HashMap;
 
 public class WorkProgressPanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, WorkProgress> progressIndex = new HashMap<>();
 
-    public WorkProgressPanel(AppContext context) {
+    public WorkProgressPanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "患者", "描述", "状态", "更新日期", "责任医生"}, 0) {
@@ -79,9 +85,11 @@ public class WorkProgressPanel extends JPanel implements Refreshable {
     public void refreshData() {
         model.setRowCount(0);
         try {
+            progressIndex.clear();
             Map<String, String> patientNames = buildPatientNames();
             Map<String, String> doctorNames = buildDoctorNames();
             for (WorkProgress progress : context.getWorkProgressService().listAll()) {
+                progressIndex.put(progress.getId(), progress);
                 model.addRow(new Object[]{
                     progress.getId(),
                     patientNames.getOrDefault(progress.getPatientId(), progress.getPatientId()),
@@ -106,12 +114,16 @@ public class WorkProgressPanel extends JPanel implements Refreshable {
             }
             ProgressForm form = new ProgressForm(patients, doctors);
             if (form.showDialog(this, "新增进度")) {
+                String doctorId = form.resolveDoctorId();
+                if (doctorId != null && !permissionGuard.ensureDoctorAccess(this, doctorId, "新增工作进度")) {
+                    return;
+                }
                 context.getWorkProgressService().createProgress(
                     form.resolvePatientId(),
                     form.descriptionField.getText().trim(),
                     form.statusField.getText().trim().isEmpty() ? "ONGOING" : form.statusField.getText().trim(),
                     form.parseDate(),
-                    form.resolveDoctorId()
+                    doctorId
                 );
                 refreshData();
             }
@@ -139,19 +151,27 @@ public class WorkProgressPanel extends JPanel implements Refreshable {
             List<Doctor> doctors = context.getDoctorService().listDoctors();
             ProgressForm form = new ProgressForm(patients, doctors);
             WorkProgress progress = optional.get();
+            if (progress.getOwnerDoctorId() != null && !permissionGuard.ensureDoctorAccess(this, progress.getOwnerDoctorId(), "编辑工作进度")) {
+                return;
+            }
             form.setPatient(progress.getPatientId());
             form.setDoctor(progress.getOwnerDoctorId());
             form.descriptionField.setText(progress.getDescription());
             form.statusField.setText(progress.getStatus());
             form.dateField.setText(progress.getLastUpdated() == null ? "" : progress.getLastUpdated().toString());
             if (form.showDialog(this, "编辑进度")) {
+                String newDoctorId = form.resolveDoctorId();
+                if (newDoctorId != null && !Objects.equals(newDoctorId, progress.getOwnerDoctorId())
+                    && !permissionGuard.ensureDoctorAccess(this, newDoctorId, "调整工作进度责任医生")) {
+                    return;
+                }
                 WorkProgress updated = new WorkProgress(
                     progress.getId(),
                     form.resolvePatientId(),
                     form.descriptionField.getText().trim(),
                     form.statusField.getText().trim().isEmpty() ? progress.getStatus() : form.statusField.getText().trim(),
                     form.parseDate(),
-                    form.resolveDoctorId()
+                    newDoctorId
                 );
                 context.getWorkProgressService().updateProgress(updated);
                 refreshData();
@@ -169,6 +189,11 @@ public class WorkProgressPanel extends JPanel implements Refreshable {
         }
         if (JOptionPane.showConfirmDialog(this, "确认删除该进度?", "确认", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
             try {
+                WorkProgress progress = progressIndex.get(model.getValueAt(row, 0).toString());
+                if (progress != null && progress.getOwnerDoctorId() != null
+                    && !permissionGuard.ensureDoctorAccess(this, progress.getOwnerDoctorId(), "删除工作进度")) {
+                    return;
+                }
                 context.getWorkProgressService().deleteProgress(model.getValueAt(row, 0).toString());
                 refreshData();
             } catch (IOException ex) {

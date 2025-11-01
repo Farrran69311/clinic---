@@ -4,6 +4,7 @@ import clinic.AppContext;
 import clinic.model.Appointment;
 import clinic.model.Doctor;
 import clinic.model.Patient;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -28,11 +29,14 @@ import java.util.Map;
 
 public class AppointmentManagementPanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, Appointment> appointmentIndex = new HashMap<>();
 
-    public AppointmentManagementPanel(AppContext context) {
+    public AppointmentManagementPanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "患者", "医生", "时间", "状态", "备注"}, 0) {
@@ -82,11 +86,13 @@ public class AppointmentManagementPanel extends JPanel implements Refreshable {
             for (Patient patient : context.getPatientService().listPatients()) {
                 patientNames.put(patient.getId(), patient.getName());
             }
+            appointmentIndex.clear();
             Map<String, String> doctorNames = new HashMap<>();
             for (Doctor doctor : context.getDoctorService().listDoctors()) {
                 doctorNames.put(doctor.getId(), doctor.getName());
             }
             for (Appointment appointment : context.getAppointmentService().listAppointments()) {
+                appointmentIndex.put(appointment.getId(), appointment);
                 model.addRow(new Object[]{
                     appointment.getId(),
                     patientNames.getOrDefault(appointment.getPatientId(), appointment.getPatientId()),
@@ -130,6 +136,9 @@ public class AppointmentManagementPanel extends JPanel implements Refreshable {
                 }
                 String patientId = patients.get(patientCombo.getSelectedIndex()).getId();
                 String doctorId = doctors.get(doctorCombo.getSelectedIndex()).getId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "新增预约")) {
+                    return;
+                }
                 context.getAppointmentService().createAppointment(patientId, doctorId, dateTime, notesField.getText().trim());
                 refreshData();
             }
@@ -144,13 +153,18 @@ public class AppointmentManagementPanel extends JPanel implements Refreshable {
             JOptionPane.showMessageDialog(this, "请选择预约", "提示", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        String appointmentId = model.getValueAt(row, 0).toString();
+        Appointment appointment = appointmentIndex.get(appointmentId);
+        if (appointment != null && !permissionGuard.ensureDoctorAccess(this, appointment.getDoctorId(), "更新预约状态")) {
+            return;
+        }
         String[] options = {"PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"};
         String current = model.getValueAt(row, 4).toString();
         String status = (String) JOptionPane.showInputDialog(this, "选择新的状态", "更新预约状态",
             JOptionPane.PLAIN_MESSAGE, null, options, current);
         if (status != null) {
             try {
-                context.getAppointmentService().updateStatus(model.getValueAt(row, 0).toString(), status);
+                context.getAppointmentService().updateStatus(appointmentId, status);
                 refreshData();
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(this, "更新失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
@@ -164,10 +178,15 @@ public class AppointmentManagementPanel extends JPanel implements Refreshable {
             JOptionPane.showMessageDialog(this, "请选择要删除的预约", "提示", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        String appointmentId = model.getValueAt(row, 0).toString();
+        Appointment appointment = appointmentIndex.get(appointmentId);
+        if (appointment != null && !permissionGuard.ensureDoctorAccess(this, appointment.getDoctorId(), "删除预约")) {
+            return;
+        }
         int confirm = JOptionPane.showConfirmDialog(this, "确认删除该预约?", "确认", JOptionPane.OK_CANCEL_OPTION);
         if (confirm == JOptionPane.OK_OPTION) {
             try {
-                context.getAppointmentService().deleteAppointment(model.getValueAt(row, 0).toString());
+                context.getAppointmentService().deleteAppointment(appointmentId);
                 refreshData();
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(this, "删除失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);

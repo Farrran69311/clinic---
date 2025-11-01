@@ -4,6 +4,7 @@ import clinic.AppContext;
 import clinic.model.CalendarEvent;
 import clinic.model.Doctor;
 import clinic.model.Patient;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -22,18 +23,23 @@ import java.awt.FlowLayout;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
+import java.util.HashMap;
 
 public class CalendarManagementPanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, CalendarEvent> eventIndex = new HashMap<>();
 
-    public CalendarManagementPanel(AppContext context) {
+    public CalendarManagementPanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "标题", "开始时间", "结束时间", "患者", "责任医生", "地点", "备注"}, 0) {
@@ -79,9 +85,11 @@ public class CalendarManagementPanel extends JPanel implements Refreshable {
     public void refreshData() {
         model.setRowCount(0);
         try {
+            eventIndex.clear();
             Map<String, String> patientNames = buildPatientNames();
             Map<String, String> doctorNames = buildDoctorNames();
             for (CalendarEvent event : context.getCalendarEventService().listAll()) {
+                eventIndex.put(event.getId(), event);
                 model.addRow(new Object[]{
                     event.getId(),
                     event.getTitle(),
@@ -104,12 +112,16 @@ public class CalendarManagementPanel extends JPanel implements Refreshable {
             List<Doctor> doctors = context.getDoctorService().listDoctors();
             EventForm form = new EventForm(patients, doctors);
             if (form.showDialog(this, "新增日程")) {
+                String doctorId = form.resolveDoctorId();
+                if (doctorId != null && !permissionGuard.ensureDoctorAccess(this, doctorId, "新增日程")) {
+                    return;
+                }
                 context.getCalendarEventService().createEvent(
                     form.titleField.getText().trim(),
                     form.parseStart(),
                     form.parseEnd(),
                     form.resolvePatientId(),
-                    form.resolveDoctorId(),
+                    doctorId,
                     form.locationField.getText().trim(),
                     form.notesField.getText().trim()
                 );
@@ -139,6 +151,9 @@ public class CalendarManagementPanel extends JPanel implements Refreshable {
             List<Doctor> doctors = context.getDoctorService().listDoctors();
             EventForm form = new EventForm(patients, doctors);
             CalendarEvent event = optional.get();
+            if (event.getOwnerDoctorId() != null && !permissionGuard.ensureDoctorAccess(this, event.getOwnerDoctorId(), "编辑日程")) {
+                return;
+            }
             form.titleField.setText(event.getTitle());
             form.startField.setText(event.getStart() == null ? "" : event.getStart().toString());
             form.endField.setText(event.getEnd() == null ? "" : event.getEnd().toString());
@@ -147,13 +162,18 @@ public class CalendarManagementPanel extends JPanel implements Refreshable {
             form.setDoctor(event.getOwnerDoctorId());
             form.setPatient(event.getRelatedPatientId());
             if (form.showDialog(this, "编辑日程")) {
+                String doctorId = form.resolveDoctorId();
+                if (doctorId != null && !Objects.equals(doctorId, event.getOwnerDoctorId())
+                    && !permissionGuard.ensureDoctorAccess(this, doctorId, "调整日程责任医生")) {
+                    return;
+                }
                 CalendarEvent updated = new CalendarEvent(
                     event.getId(),
                     form.titleField.getText().trim(),
                     form.parseStart(),
                     form.parseEnd(),
                     form.resolvePatientId(),
-                    form.resolveDoctorId(),
+                    doctorId,
                     form.locationField.getText().trim(),
                     form.notesField.getText().trim()
                 );
@@ -169,6 +189,11 @@ public class CalendarManagementPanel extends JPanel implements Refreshable {
         int row = table.getSelectedRow();
         if (row < 0) {
             JOptionPane.showMessageDialog(this, "请选择要删除的日程", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        CalendarEvent event = eventIndex.get(model.getValueAt(row, 0).toString());
+        if (event != null && event.getOwnerDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, event.getOwnerDoctorId(), "删除日程")) {
             return;
         }
         if (JOptionPane.showConfirmDialog(this, "确认删除该日程?", "确认", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {

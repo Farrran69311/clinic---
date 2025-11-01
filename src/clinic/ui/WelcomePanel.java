@@ -10,6 +10,7 @@ import clinic.model.Role;
 import clinic.model.User;
 import clinic.model.WorkProgress;
 import clinic.ui.common.UIUtils;
+import clinic.util.DoctorMatcher;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -382,10 +383,10 @@ public class WelcomePanel extends JPanel implements Refreshable {
                 return Optional.of(doctor);
             }
         }
-        String normalizedUsername = normalizeDoctorName(user.getUsername());
+        String normalizedUsername = DoctorMatcher.normalizeName(user.getUsername());
         if (!normalizedUsername.isBlank()) {
             for (Doctor doctor : doctors) {
-                if (normalizeDoctorName(doctor.getName()).equalsIgnoreCase(normalizedUsername)) {
+                if (DoctorMatcher.normalizeName(doctor.getName()).equalsIgnoreCase(normalizedUsername)) {
                     return Optional.of(doctor);
                 }
             }
@@ -466,14 +467,6 @@ public class WelcomePanel extends JPanel implements Refreshable {
             default:
                 return status;
         }
-    }
-
-    private String normalizeDoctorName(String name) {
-        if (name == null) {
-            return "";
-        }
-        String trimmed = name.trim();
-        return trimmed.endsWith("医生") ? trimmed.substring(0, trimmed.length() - 2) : trimmed;
     }
 
     private String snippet(String text) {

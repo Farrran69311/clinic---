@@ -6,6 +6,7 @@ import clinic.model.ExpertParticipant;
 import clinic.model.ExpertSession;
 import clinic.model.MeetingMinute;
 import clinic.model.Patient;
+import clinic.security.PermissionGuard;
 import clinic.ui.Refreshable;
 import clinic.ui.common.TableUtils;
 import clinic.ui.common.UIUtils;
@@ -30,15 +31,19 @@ import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 public class ExpertSessionManagementPanel extends JPanel implements Refreshable {
     private final AppContext context;
+    private final PermissionGuard permissionGuard;
     private final DefaultTableModel model;
     private final JTable table;
+    private final Map<String, ExpertSession> sessionIndex = new HashMap<>();
 
-    public ExpertSessionManagementPanel(AppContext context) {
+    public ExpertSessionManagementPanel(AppContext context, PermissionGuard permissionGuard) {
         this.context = context;
+        this.permissionGuard = permissionGuard;
         setLayout(new BorderLayout(10, 10));
         UIUtils.applyPagePadding(this);
         model = new DefaultTableModel(new String[]{"编号", "主题", "主持医生", "时间", "状态", "会议链接", "备注"}, 0) {
@@ -94,7 +99,9 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
         model.setRowCount(0);
         try {
             Map<String, String> doctorNames = buildDoctorNames();
+            sessionIndex.clear();
             for (ExpertSession session : context.getExpertSessionService().listSessions()) {
+                sessionIndex.put(session.getId(), session);
                 model.addRow(new Object[]{
                     session.getId(),
                     session.getTitle(),
@@ -121,9 +128,13 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
         SessionForm form = new SessionForm(doctorNames);
         if (form.showDialog(this, "新增会诊")) {
             try {
+                String doctorId = form.resolveDoctorId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "安排专家会诊")) {
+                    return;
+                }
                 context.getExpertSessionService().createSession(
                     form.titleField.getText().trim(),
-                    form.resolveDoctorId(),
+                    doctorId,
                     form.parseDateTime(),
                     form.statusField.getText().trim().isEmpty() ? "SCHEDULED" : form.statusField.getText().trim(),
                     form.meetingField.getText().trim(),
@@ -157,6 +168,9 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             return;
         }
         ExpertSession session = optional.get();
+        if (session.getHostDoctorId() != null && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "编辑专家会诊")) {
+            return;
+        }
         Map<String, String> doctorNames;
         try {
             doctorNames = buildDoctorNames();
@@ -173,10 +187,15 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
         form.notesField.setText(session.getNotes());
         if (form.showDialog(this, "编辑会诊")) {
             try {
+                String hostDoctorId = form.resolveDoctorId();
+                if (session.getHostDoctorId() != null && !Objects.equals(session.getHostDoctorId(), hostDoctorId)
+                    && !permissionGuard.ensureDoctorAccess(this, hostDoctorId, "调整会诊主持医生")) {
+                    return;
+                }
                 ExpertSession updated = new ExpertSession(
                     session.getId(),
                     form.titleField.getText().trim(),
-                    form.resolveDoctorId(),
+                    hostDoctorId,
                     form.parseDateTime(),
                     form.statusField.getText().trim().isEmpty() ? session.getStatus() : form.statusField.getText().trim(),
                     form.meetingField.getText().trim(),
@@ -199,6 +218,11 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             return;
         }
         String id = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(id);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "删除专家会诊")) {
+            return;
+        }
         if (JOptionPane.showConfirmDialog(this, "确认删除该会诊?", "确认", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
             try {
                 context.getExpertSessionService().deleteSession(id);
@@ -216,6 +240,11 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             return;
         }
         String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "维护会诊参与者")) {
+            return;
+        }
         ParticipantsDialog dialog = new ParticipantsDialog(sessionId);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
@@ -228,6 +257,11 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             return;
         }
         String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "查看会诊纪要")) {
+            return;
+        }
         try {
             List<MeetingMinute> minutes = context.getMeetingMinuteService().listBySession(sessionId);
             if (minutes.isEmpty()) {
@@ -254,6 +288,11 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             return;
         }
         String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "新增会诊纪要")) {
+            return;
+        }
         try {
             List<Doctor> doctors = context.getDoctorService().listDoctors();
             if (doctors.isEmpty()) {
@@ -270,6 +309,9 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             };
             if (JOptionPane.showConfirmDialog(this, message, "新增纪要", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
                 String doctorId = doctors.get(doctorCombo.getSelectedIndex()).getId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "登记会议纪要")) {
+                    return;
+                }
                 context.getMeetingMinuteService().createMinute(sessionId, doctorId, summaryField.getText().trim(), actionField.getText().trim());
                 JOptionPane.showMessageDialog(this, "已保存会议纪要", "提示", JOptionPane.INFORMATION_MESSAGE);
             }
@@ -392,6 +434,9 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
                     String id;
                     if ("医生".equals(typeCombo.getSelectedItem())) {
                         id = doctors.get(personCombo.getSelectedIndex()).getId();
+                        if (!permissionGuard.ensureDoctorAccess(ExpertSessionManagementPanel.this, id, "邀请医生参与会诊")) {
+                            return;
+                        }
                     } else {
                         id = patients.get(personCombo.getSelectedIndex()).getId();
                     }
@@ -411,6 +456,11 @@ public class ExpertSessionManagementPanel extends JPanel implements Refreshable 
             }
             String participantId = participantModel.getValueAt(row, 0).toString();
             try {
+                Map<String, String> doctorNames = buildDoctorNames();
+                if (doctorNames.containsKey(participantId)
+                    && !permissionGuard.ensureDoctorAccess(ExpertSessionManagementPanel.this, participantId, "移除医生参与者")) {
+                    return;
+                }
                 context.getExpertSessionService().removeParticipant(sessionId, participantId);
                 refreshParticipants();
             } catch (IOException ex) {

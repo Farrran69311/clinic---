@@ -1,11 +1,17 @@
 package clinic.ui.common;
 
+import javax.swing.AbstractAction;
+import javax.swing.ActionMap;
+import javax.swing.InputMap;
+import javax.swing.JComponent;
 import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.RowFilter;
+import javax.swing.SwingUtilities;
 import javax.swing.ToolTipManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -13,6 +19,8 @@ import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.Dimension;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
@@ -77,15 +85,39 @@ public final class TableUtils {
             }
         });
 
-        table.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2 && !e.isConsumed()) {
+        MouseAdapter detailListener = new MouseAdapter() {
+            private void handle(MouseEvent e) {
+                if (e.getClickCount() == 2 && !e.isConsumed() && SwingUtilities.isLeftMouseButton(e)) {
                     int viewRow = table.rowAtPoint(e.getPoint());
                     if (viewRow < 0) {
                         return;
                     }
                     table.setRowSelectionInterval(viewRow, viewRow);
+                    showDetailDialog(table, viewRow);
+                }
+            }
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                handle(e);
+            }
+
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                handle(e);
+            }
+        };
+        table.addMouseListener(detailListener);
+
+        InputMap inputMap = table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
+        ActionMap actionMap = table.getActionMap();
+        String actionKey = "clinic.showDetail";
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), actionKey);
+        actionMap.put(actionKey, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                int viewRow = table.getSelectedRow();
+                if (viewRow >= 0) {
                     showDetailDialog(table, viewRow);
                 }
             }
