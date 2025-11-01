@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import clinic.persistence.mysql.CsvToMySqlMirror;
+
 public final class CsvDataStore {
     private CsvDataStore() {
     }
@@ -35,6 +37,7 @@ public final class CsvDataStore {
             lines.add(String.join("|", record));
         }
         Files.write(file, lines, StandardCharsets.UTF_8);
+        CsvToMySqlMirror.getInstance().mirror(file, header, records);
     }
 
     public static String randomId() {

@@ -4,17 +4,28 @@ Java Swing 图形化桌面应用，覆盖医疗诊所日常管理场景，提供
 
 ## 核心特性
 
-- 双角色登录：医生、管理员、患者分角色进入对应工作台。
-- 预约与排班：支持创建、确认、取消预约并同步日历事件。
-- 问诊与处方：记录问诊摘要、生成处方、跟踪发药状态。
-- 专家会诊全流程：会诊排期、参与人员、会议纪要、专家建议一体化呈现。
-- 疑难病例库与工作进度：沉淀案例经验，追踪患者待办与责任医生。
-- Insight 助理：整合患者近期数据生成诊疗要点与周报。
-- 财务中心：支持患者支付、退款、医保理赔进度追踪，以及医生端待处理账单视图。
-- 药房库存与盈亏：记录入库、出库、盘点调整，自动计算库存成本与数量。
-- 操作审计：关键操作写入审计日志，便于安全追踪与合规复核。
+- 持续双写：CSV 写入同时实时镜像到 MySQL，可结合 Navicat 等工具进行在线分析。
 - 表格交互增强：所有列表支持搜索过滤、悬停快速预览与双击详情弹窗。
 - 全局刷新框架：Swing `Refreshable` 接口配合定时器实现自动刷新，并提供手动刷新按钮；会议纪要、洞察等模块均可实时更新。
+
+## MySQL 双写与数据同步
+
+- 默认启用 CSV→MySQL 持续双写，当存在 MySQL 驱动并能连接到 `clinic` 库时，每次写入 CSV 会同时更新同名 MySQL 表。
+- 连接配置支持环境变量或 JVM 参数覆盖：`CLINIC_DB_HOST`、`CLINIC_DB_PORT`、`CLINIC_DB_NAME`、`CLINIC_DB_USER`、`CLINIC_DB_PASSWORD`（默认 `localhost:3306 / clinic / root / 123456`）。
+- 请将 `mysql-connector-j` 依赖加入运行时类路径，例如：
+
+  ```bash
+  java -cp "out:mysql-connector-j-8.4.0.jar" clinic.ClinicApp
+  ```
+
+- 首次迁移：
+
+  ```bash
+  mysql -h localhost -P 3306 -u root -p123456 < scripts/mysql/create_schema.sql
+  ./scripts/mysql/import_csv.sh
+  ```
+
+- 若需临时关闭同步，可设置 `CLINIC_DB_SYNC_ENABLED=false` 或 JVM 参数 `-Dclinic.db.sync.enabled=false`。
 - 丰富示例数据：`data/` 目录预置医生、患者、会诊、药品等多科室数据，可直接体验系统流程。
 
 ## 环境要求
