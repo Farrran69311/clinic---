@@ -13,11 +13,6 @@ if ! command -v mysql >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! command -v mysqlimport >/dev/null 2>&1; then
-    echo "mysqlimport 命令未找到，请安装 MySQL 客户端工具" >&2
-    exit 1
-fi
-
 TABLES=(
     users
     patients
@@ -39,6 +34,14 @@ TABLES=(
     audit_logs
 )
 
+mysql \
+    --host="${MYSQL_HOST}" \
+    --port="${MYSQL_PORT}" \
+    --user="${MYSQL_USER}" \
+    --password="${MYSQL_PASSWORD}" \
+    --local-infile=1 \
+    -e "SET GLOBAL local_infile = 1;" >/dev/null 2>&1 || true
+
 for table in "${TABLES[@]}"; do
     CSV_FILE="${DATA_DIR}/${table}.csv"
     if [ ! -f "${CSV_FILE}" ]; then
@@ -46,19 +49,27 @@ for table in "${TABLES[@]}"; do
         continue
     fi
     echo "导入 ${CSV_FILE} -> ${MYSQL_DATABASE}.${table}"
-    mysqlimport \
+    header=$(head -n 1 "${CSV_FILE}")
+    columns=$(echo "${header}" | sed 's/`/``/g; s/|/`,`/g; s/^/`/; s/$/`/')
+    escaped_path=$(printf "%s" "${CSV_FILE}" | sed "s/'/''/g")
+    sql=$(cat <<SQL
+    LOAD DATA LOCAL INFILE '${escaped_path}' INTO TABLE \`${MYSQL_DATABASE}\`.\`${table}\`
+CHARACTER SET utf8mb4
+FIELDS TERMINATED BY '|'
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES (${columns});
+SQL
+    )
+    mysql \
         --host="${MYSQL_HOST}" \
         --port="${MYSQL_PORT}" \
         --user="${MYSQL_USER}" \
         --password="${MYSQL_PASSWORD}" \
-        --local \
-        --columns "$(head -n 1 "${CSV_FILE}" | tr '|' ',')" \
-        --fields-terminated-by='|' \
-        --ignore-lines=1 \
-        "${MYSQL_DATABASE}" \
-        "${CSV_FILE}"
+        --local-infile=1 \
+        --default-character-set=utf8mb4 \
+        -e "${sql}"
     echo "完成 ${table}"
     echo
-}
+done
 
 echo "全部导入完成"

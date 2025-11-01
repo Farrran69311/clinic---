@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
     consultation_id VARCHAR(64) NOT NULL,
     medicine_id VARCHAR(64) NOT NULL,
     quantity INT NOT NULL,
-    usage VARCHAR(255),
+    `usage` VARCHAR(255),
     status VARCHAR(32) NOT NULL,
     FOREIGN KEY (consultation_id) REFERENCES consultations(id),
     FOREIGN KEY (medicine_id) REFERENCES medicines(id)
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id VARCHAR(64) PRIMARY KEY,
-    timestamp DATETIME NOT NULL,
+    `timestamp` DATETIME NOT NULL,
     user_id VARCHAR(64),
     role VARCHAR(32),
     action VARCHAR(128) NOT NULL,
