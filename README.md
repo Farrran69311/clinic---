@@ -1,10 +1,12 @@
 # 医疗诊所管理系统
 
-Java Swing 图形化桌面应用，覆盖医疗诊所日常管理场景，提供医生端与患者端门户、在线专家会诊、病例库、药房库存与 AI 辅助洞察等功能。
+Java Swing 图形化桌面应用，覆盖医疗诊所日常管理、财务合规与药房运营场景，提供医生端、管理员端与患者端门户，内置在线专家会诊、病例库、库存盈亏、支付理赔与审计追踪等能力。
 
 ## 核心特性
 
-- 持续双写：CSV 写入同时实时镜像到 MySQL，可结合 Navicat 等工具进行在线分析。
+- 医生门户新增 **财务中心** 与 **库存流水** 标签，支持收费、理赔、退款、入库/出库/盘点等全流程操作。
+- 管理员门户新增 **审计日志** 标签，集中展示支付、库存、理赔等关键操作，实现合规留痕。
+- 持续双写：CSV 写入同时实时镜像到 MySQL，可结合 BI 工具进行在线分析与对账。
 - 表格交互增强：所有列表支持搜索过滤、悬停快速预览与双击详情弹窗。
 - 全局刷新框架：Swing `Refreshable` 接口配合定时器实现自动刷新，并提供手动刷新按钮；会议纪要、洞察等模块均可实时更新。
 
@@ -31,13 +33,13 @@ Java Swing 图形化桌面应用，覆盖医疗诊所日常管理场景，提供
 ## 环境要求
 
 - JDK 17（或兼容版本）
-- 无需额外第三方依赖，使用标准 Java 类库读写 CSV
+- 运行时需将 `mysql-connector-j` 加入类路径以启用 MySQL 镜像（未提供驱动时系统会自动降级为仅写 CSV）
 
 ## 编译与运行
 
 ```bash
-javac -encoding UTF-8 -d out $(find src -name '*.java')
-java -cp out clinic.ClinicApp
+javac -encoding UTF-8 -cp mysql-connector-j-8.4.0.jar -d out $(find src -name '*.java')
+java -cp "out:mysql-connector-j-8.4.0.jar" clinic.ClinicApp
 ```
 
 > Windows 用户可将 `find` 替换为 PowerShell 版本：`Get-ChildItem -Recurse -Filter *.java | ForEach-Object { $_.FullName }`。
@@ -50,6 +52,12 @@ java -cp out clinic.ClinicApp
   - `alice` / `patient123`
   - `huangxiaoyu` / `patient123`
   - 亦可使用注册入口新建患者账号
+
+### 新增业务操作
+
+- 医生登录后可在“财务中心”中创建费用、标记支付、发起/审核医保理赔，并查看待办金额概览。
+- “库存流水”用于记录药品入库、出库、盘点调整，并实时计算库存数量与金额。
+- 管理员登录将额外看到“审计日志”标签，可检索支付、理赔、库存等敏感操作的追踪记录。
 
 ## 数据文件概览
 
@@ -71,7 +79,7 @@ java -cp out clinic.ClinicApp
 ## 已知问题
 
 - Insight 助理的医生端周总结在当前示例数据下可能为空，可按需补充 `work_progress.csv` 等数据。
-- 财务中心当前以 CSV 作为轻量存储，若并发写入需求较高需升级至数据库方案。
+- 财务中心与库存流水默认基于 CSV 存储，若并发写入需求较高建议迁移至数据库方案或开启 MySQL 双写。
 
 ## 目录结构
 
