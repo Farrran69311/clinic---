@@ -1,17 +1,21 @@
 package clinic;
 
 import clinic.persistence.AppointmentRepository;
-import clinic.persistence.CaseRecordRepository;
+import clinic.persistence.AuditLogRepository;
 import clinic.persistence.CalendarEventRepository;
+import clinic.persistence.CaseRecordRepository;
 import clinic.persistence.ConsultationRepository;
 import clinic.persistence.DoctorRepository;
 import clinic.persistence.ExpertAdviceRepository;
 import clinic.persistence.ExpertParticipantRepository;
 import clinic.persistence.ExpertSessionRepository;
+import clinic.persistence.InsuranceClaimRepository;
 import clinic.persistence.MedicineRepository;
 import clinic.persistence.MeetingMinuteRepository;
+import clinic.persistence.PaymentRepository;
 import clinic.persistence.PatientRepository;
 import clinic.persistence.PrescriptionRepository;
+import clinic.persistence.StockMovementRepository;
 import clinic.persistence.UserRepository;
 import clinic.persistence.WorkProgressRepository;
 import clinic.service.AppointmentService;
@@ -22,10 +26,14 @@ import clinic.service.ConsultationService;
 import clinic.service.DoctorService;
 import clinic.service.ExpertAdviceService;
 import clinic.service.ExpertSessionService;
+import clinic.service.AuditService;
+import clinic.service.InsuranceClaimService;
 import clinic.service.InsightService;
+import clinic.service.InventoryService;
 import clinic.service.MeetingMinuteService;
 import clinic.service.PatientService;
 import clinic.service.PharmacyService;
+import clinic.service.PaymentService;
 import clinic.service.WorkProgressService;
 
 import java.nio.file.Path;
@@ -44,6 +52,10 @@ public class AppContext {
     private final MeetingMinuteService meetingMinuteService;
     private final ExpertAdviceService expertAdviceService;
     private final InsightService insightService;
+    private final PaymentService paymentService;
+    private final InsuranceClaimService insuranceClaimService;
+    private final InventoryService inventoryService;
+    private final AuditService auditService;
 
     public AppContext(Path dataDirectory) {
         Path users = dataDirectory.resolve("users.csv");
@@ -60,6 +72,10 @@ public class AppContext {
         Path calendarEvents = dataDirectory.resolve("calendar_events.csv");
         Path meetingMinutes = dataDirectory.resolve("meeting_minutes.csv");
         Path expertAdvices = dataDirectory.resolve("expert_advices.csv");
+        Path payments = dataDirectory.resolve("payments.csv");
+        Path insuranceClaims = dataDirectory.resolve("insurance_claims.csv");
+        Path stockMovements = dataDirectory.resolve("stock_movements.csv");
+        Path auditLogs = dataDirectory.resolve("audit_logs.csv");
 
         UserRepository userRepository = new UserRepository(users);
         PatientRepository patientRepository = new PatientRepository(patients);
@@ -75,6 +91,10 @@ public class AppContext {
         CalendarEventRepository calendarEventRepository = new CalendarEventRepository(calendarEvents);
         MeetingMinuteRepository meetingMinuteRepository = new MeetingMinuteRepository(meetingMinutes);
         ExpertAdviceRepository expertAdviceRepository = new ExpertAdviceRepository(expertAdvices);
+    PaymentRepository paymentRepository = new PaymentRepository(payments);
+    InsuranceClaimRepository insuranceClaimRepository = new InsuranceClaimRepository(insuranceClaims);
+    StockMovementRepository stockMovementRepository = new StockMovementRepository(stockMovements);
+    AuditLogRepository auditLogRepository = new AuditLogRepository(auditLogs);
 
         this.authService = new AuthService(userRepository, patientRepository);
         this.patientService = new PatientService(patientRepository);
@@ -88,6 +108,10 @@ public class AppContext {
         this.calendarEventService = new CalendarEventService(calendarEventRepository);
         this.meetingMinuteService = new MeetingMinuteService(meetingMinuteRepository);
         this.expertAdviceService = new ExpertAdviceService(expertAdviceRepository);
+        this.paymentService = new PaymentService(paymentRepository);
+        this.insuranceClaimService = new InsuranceClaimService(insuranceClaimRepository);
+        this.inventoryService = new InventoryService(stockMovementRepository);
+        this.auditService = new AuditService(auditLogRepository);
         this.insightService = new InsightService(
             this.patientService,
             this.doctorService,
@@ -148,5 +172,21 @@ public class AppContext {
 
     public InsightService getInsightService() {
         return insightService;
+    }
+
+    public PaymentService getPaymentService() {
+        return paymentService;
+    }
+
+    public InsuranceClaimService getInsuranceClaimService() {
+        return insuranceClaimService;
+    }
+
+    public InventoryService getInventoryService() {
+        return inventoryService;
+    }
+
+    public AuditService getAuditService() {
+        return auditService;
     }
 }
