@@ -1,0 +1,3194 @@
+src/clinic/security/PermissionGuard.java
+package clinic.security;
+import clinic.AppContext;
+import clinic.model.Doctor;
+import clinic.model.Role;
+import clinic.model.User;
+import clinic.util.DoctorMatcher;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JTextField;
+import java.awt.Component;
+import java.awt.GridLayout;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+public class PermissionGuard {
+    private final AppContext context;
+    private final User currentUser;
+    private final Set<String> approvedDoctorIds = new HashSet<>();
+    private Optional<Doctor> cachedCurrentDoctor;
+    public PermissionGuard(AppContext context, User currentUser) {
+        this.context = context;
+        this.currentUser = currentUser;
+    }
+    public Role getCurrentRole() {
+        return currentUser.getRole();
+    }
+    public boolean ensureDoctorAccess(Component parent, String doctorReference, String actionLabel) {
+        if (doctorReference == null || doctorReference.isBlank()) {
+            return true;
+        }
+        try {
+            return evaluateAccess(parent, doctorReference.trim(), actionLabel);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "验证医生权限失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+    public boolean ensureDoctorAccess(Component parent, Doctor doctor, String actionLabel) {
+        if (doctor == null) {
+            return true;
+        }
+        return ensureDoctorAccess(parent, doctor.getId(), actionLabel);
+    }
+    private boolean evaluateAccess(Component parent, String reference, String actionLabel) throws IOException {
+        if (currentUser.getRole() == Role.ADMIN) {
+            return true;
+        }
+        List<Doctor> doctors = context.getDoctorService().listDoctors();
+        Optional<Doctor> targetDoctor = doctors.stream()
+            .filter(doc -> DoctorMatcher.matches(reference, doc))
+            .findFirst();
+        if (targetDoctor.isPresent() && approvedDoctorIds.contains(targetDoctor.get().getId())) {
+            return true;
+        }
+        Optional<Doctor> currentDoctor = getCurrentDoctor(doctors);
+        if (currentDoctor.isPresent() && targetDoctor.isPresent() && currentDoctor.get().getId().equals(targetDoctor.get().getId())) {
+            return true;
+        }
+        return promptForVerification(parent, doctors, targetDoctor, reference, actionLabel);
+    }
+    private Optional<Doctor> getCurrentDoctor(List<Doctor> doctors) {
+        if (currentUser.getRole() != Role.DOCTOR) {
+            return Optional.empty();
+        }
+        if (cachedCurrentDoctor != null) {
+            return cachedCurrentDoctor;
+        }
+        Optional<Doctor> resolved = resolveDoctorForUser(doctors, currentUser);
+        cachedCurrentDoctor = resolved;
+        resolved.ifPresent(doctor -> approvedDoctorIds.add(doctor.getId()));
+        return resolved;
+    }
+    private boolean promptForVerification(Component parent, List<Doctor> doctors, Optional<Doctor> targetDoctor,
+                                           String reference, String actionLabel) throws IOException {
+        JTextField usernameField = new JTextField();
+        JPasswordField passwordField = new JPasswordField();
+        JPanel panel = new JPanel(new GridLayout(0, 1, 6, 6));
+        if (actionLabel != null && !actionLabel.isBlank()) {
+            panel.add(new JLabel("操作: " + actionLabel));
+        }
+        if (targetDoctor.isPresent()) {
+            panel.add(new JLabel("目标医生: " + targetDoctor.get().getName()));
+        } else {
+            panel.add(new JLabel("目标医生标识: " + reference));
+        }
+        panel.add(new JLabel("医生账号"));
+        panel.add(usernameField);
+        panel.add(new JLabel("登录密码"));
+        panel.add(passwordField);
+        int option = JOptionPane.showConfirmDialog(parent, panel, "跨账号修改验证", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        char[] password = passwordField.getPassword();
+        if (option != JOptionPane.OK_OPTION) {
+            Arrays.fill(password, '\0');
+            return false;
+        }
+        try {
+            Optional<User> loginResult = context.getAuthService().login(usernameField.getText().trim(), new String(password));
+            if (loginResult.isEmpty()) {
+                JOptionPane.showMessageDialog(parent, "账号或密码错误", "提示", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            User verifiedUser = loginResult.get();
+            if (verifiedUser.getRole() != Role.DOCTOR) {
+                JOptionPane.showMessageDialog(parent, "必须使用医生账号完成验证", "提示", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            Optional<Doctor> verifiedDoctor = resolveDoctorForUser(doctors, verifiedUser);
+            if (verifiedDoctor.isEmpty()) {
+                JOptionPane.showMessageDialog(parent, "该账号尚未关联医生档案，请检查医生信息表", "提示", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            Doctor doctor = verifiedDoctor.get();
+            if (targetDoctor.isPresent() && !Objects.equals(targetDoctor.get().getId(), doctor.getId())) {
+                JOptionPane.showMessageDialog(parent, "请输入目标医生 " + targetDoctor.get().getName() + " 的账号", "提示", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            if (targetDoctor.isEmpty() && !DoctorMatcher.matches(reference, doctor)) {
+                JOptionPane.showMessageDialog(parent, "输入的医生账号与目标记录不一致", "提示", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+            approvedDoctorIds.add(doctor.getId());
+            return true;
+        } finally {
+            Arrays.fill(password, '\0');
+        }
+    }
+    private Optional<Doctor> resolveDoctorForUser(List<Doctor> doctors, User user) {
+        if (user == null) {
+            return Optional.empty();
+        }
+        for (Doctor doctor : doctors) {
+            if (Objects.equals(doctor.getId(), user.getId())) {
+                return Optional.of(doctor);
+            }
+        }
+        for (Doctor doctor : doctors) {
+            if (doctor.getName().equalsIgnoreCase(user.getUsername())) {
+                return Optional.of(doctor);
+            }
+        }
+        String normalized = DoctorMatcher.normalizeName(user.getUsername());
+        if (!normalized.isBlank()) {
+            for (Doctor doctor : doctors) {
+                if (DoctorMatcher.normalizeName(doctor.getName()).equalsIgnoreCase(normalized)) {
+                    return Optional.of(doctor);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+}
+
+src/clinic/AppContext.java
+package clinic;
+import clinic.persistence.AppointmentRepository;
+import clinic.persistence.AuditLogRepository;
+import clinic.persistence.CalendarEventRepository;
+import clinic.persistence.CaseRecordRepository;
+import clinic.persistence.ConsultationRepository;
+import clinic.persistence.DoctorRepository;
+import clinic.persistence.ExpertAdviceRepository;
+import clinic.persistence.ExpertParticipantRepository;
+import clinic.persistence.ExpertSessionRepository;
+import clinic.persistence.InsuranceClaimRepository;
+import clinic.persistence.MedicineRepository;
+import clinic.persistence.MeetingMinuteRepository;
+import clinic.persistence.PaymentRepository;
+import clinic.persistence.PatientRepository;
+import clinic.persistence.PrescriptionRepository;
+import clinic.persistence.StockMovementRepository;
+import clinic.persistence.UserRepository;
+import clinic.persistence.WorkProgressRepository;
+import clinic.service.AppointmentService;
+import clinic.service.AuthService;
+import clinic.service.CalendarEventService;
+import clinic.service.CaseRecordService;
+import clinic.service.ConsultationService;
+import clinic.service.DoctorService;
+import clinic.service.ExpertAdviceService;
+import clinic.service.ExpertSessionService;
+import clinic.service.AuditService;
+import clinic.service.InsuranceClaimService;
+import clinic.service.InsightService;
+import clinic.service.InventoryService;
+import clinic.service.MeetingMinuteService;
+import clinic.service.PatientService;
+import clinic.service.PharmacyService;
+import clinic.service.PaymentService;
+import clinic.service.WorkProgressService;
+import java.nio.file.Path;
+public class AppContext {
+    private final AuthService authService;
+    private final PatientService patientService;
+    private final DoctorService doctorService;
+    private final AppointmentService appointmentService;
+    private final ConsultationService consultationService;
+    private final PharmacyService pharmacyService;
+    private final ExpertSessionService expertSessionService;
+    private final CaseRecordService caseRecordService;
+    private final WorkProgressService workProgressService;
+    private final CalendarEventService calendarEventService;
+    private final MeetingMinuteService meetingMinuteService;
+    private final ExpertAdviceService expertAdviceService;
+    private final InsightService insightService;
+    private final PaymentService paymentService;
+    private final InsuranceClaimService insuranceClaimService;
+    private final InventoryService inventoryService;
+    private final AuditService auditService;
+    public AppContext(Path dataDirectory) {
+        Path users = dataDirectory.resolve("users.csv");
+        Path patients = dataDirectory.resolve("patients.csv");
+        Path doctors = dataDirectory.resolve("doctors.csv");
+        Path appointments = dataDirectory.resolve("appointments.csv");
+        Path consultations = dataDirectory.resolve("consultations.csv");
+        Path medicines = dataDirectory.resolve("medicines.csv");
+        Path prescriptions = dataDirectory.resolve("prescriptions.csv");
+        Path expertSessions = dataDirectory.resolve("expert_sessions.csv");
+        Path expertParticipants = dataDirectory.resolve("expert_participants.csv");
+        Path caseLibrary = dataDirectory.resolve("case_library.csv");
+        Path workProgress = dataDirectory.resolve("work_progress.csv");
+        Path calendarEvents = dataDirectory.resolve("calendar_events.csv");
+        Path meetingMinutes = dataDirectory.resolve("meeting_minutes.csv");
+        Path expertAdvices = dataDirectory.resolve("expert_advices.csv");
+        Path payments = dataDirectory.resolve("payments.csv");
+        Path insuranceClaims = dataDirectory.resolve("insurance_claims.csv");
+        Path stockMovements = dataDirectory.resolve("stock_movements.csv");
+        Path auditLogs = dataDirectory.resolve("audit_logs.csv");
+        UserRepository userRepository = new UserRepository(users);
+        PatientRepository patientRepository = new PatientRepository(patients);
+        DoctorRepository doctorRepository = new DoctorRepository(doctors);
+        AppointmentRepository appointmentRepository = new AppointmentRepository(appointments);
+        ConsultationRepository consultationRepository = new ConsultationRepository(consultations);
+        MedicineRepository medicineRepository = new MedicineRepository(medicines);
+        PrescriptionRepository prescriptionRepository = new PrescriptionRepository(prescriptions);
+        ExpertSessionRepository expertSessionRepository = new ExpertSessionRepository(expertSessions);
+        ExpertParticipantRepository expertParticipantRepository = new ExpertParticipantRepository(expertParticipants);
+        CaseRecordRepository caseRecordRepository = new CaseRecordRepository(caseLibrary);
+        WorkProgressRepository workProgressRepository = new WorkProgressRepository(workProgress);
+        CalendarEventRepository calendarEventRepository = new CalendarEventRepository(calendarEvents);
+        MeetingMinuteRepository meetingMinuteRepository = new MeetingMinuteRepository(meetingMinutes);
+        ExpertAdviceRepository expertAdviceRepository = new ExpertAdviceRepository(expertAdvices);
+    PaymentRepository paymentRepository = new PaymentRepository(payments);
+    InsuranceClaimRepository insuranceClaimRepository = new InsuranceClaimRepository(insuranceClaims);
+    StockMovementRepository stockMovementRepository = new StockMovementRepository(stockMovements);
+    AuditLogRepository auditLogRepository = new AuditLogRepository(auditLogs);
+        this.authService = new AuthService(userRepository, patientRepository);
+        this.patientService = new PatientService(patientRepository);
+        this.doctorService = new DoctorService(doctorRepository);
+        this.appointmentService = new AppointmentService(appointmentRepository);
+        this.consultationService = new ConsultationService(consultationRepository);
+        this.pharmacyService = new PharmacyService(medicineRepository, prescriptionRepository);
+        this.expertSessionService = new ExpertSessionService(expertSessionRepository, expertParticipantRepository);
+        this.caseRecordService = new CaseRecordService(caseRecordRepository);
+        this.workProgressService = new WorkProgressService(workProgressRepository);
+        this.calendarEventService = new CalendarEventService(calendarEventRepository);
+        this.meetingMinuteService = new MeetingMinuteService(meetingMinuteRepository);
+        this.expertAdviceService = new ExpertAdviceService(expertAdviceRepository);
+        this.paymentService = new PaymentService(paymentRepository);
+        this.insuranceClaimService = new InsuranceClaimService(insuranceClaimRepository);
+        this.inventoryService = new InventoryService(stockMovementRepository);
+        this.auditService = new AuditService(auditLogRepository);
+        this.insightService = new InsightService(
+            this.patientService,
+            this.doctorService,
+            this.caseRecordService,
+            this.consultationService,
+            this.workProgressService,
+            this.expertAdviceService
+        );
+    }
+    public AuthService getAuthService() {
+        return authService;
+    }
+    public PatientService getPatientService() {
+        return patientService;
+    }
+    public DoctorService getDoctorService() {
+        return doctorService;
+    }
+    public AppointmentService getAppointmentService() {
+        return appointmentService;
+    }
+    public ConsultationService getConsultationService() {
+        return consultationService;
+    }
+    public PharmacyService getPharmacyService() {
+        return pharmacyService;
+    }
+    public ExpertSessionService getExpertSessionService() {
+        return expertSessionService;
+    }
+    public CaseRecordService getCaseRecordService() {
+        return caseRecordService;
+    }
+    public WorkProgressService getWorkProgressService() {
+        return workProgressService;
+    }
+    public CalendarEventService getCalendarEventService() {
+        return calendarEventService;
+    }
+    public MeetingMinuteService getMeetingMinuteService() {
+        return meetingMinuteService;
+    }
+    public ExpertAdviceService getExpertAdviceService() {
+        return expertAdviceService;
+    }
+    public InsightService getInsightService() {
+        return insightService;
+    }
+    public PaymentService getPaymentService() {
+        return paymentService;
+    }
+    public InsuranceClaimService getInsuranceClaimService() {
+        return insuranceClaimService;
+    }
+    public InventoryService getInventoryService() {
+        return inventoryService;
+    }
+    public AuditService getAuditService() {
+        return auditService;
+    }
+}
+
+src/clinic/service/AuditService.java
+package clinic.service;
+import clinic.model.AuditLog;
+import clinic.persistence.AuditLogRepository;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+public class AuditService {
+    private final AuditLogRepository auditLogRepository;
+    public AuditService(AuditLogRepository auditLogRepository) {
+        this.auditLogRepository = auditLogRepository;
+    }
+    public AuditLog logAction(String userId,
+                              String role,
+                              String action,
+                              String entityType,
+                              String entityId,
+                              String detail,
+                              String result,
+                              String ipAddress) throws IOException {
+        AuditLog log = new AuditLog(
+            java.util.UUID.randomUUID().toString(),
+            LocalDateTime.now(),
+            userId,
+            role,
+            action,
+            entityType,
+            entityId,
+            detail,
+            result,
+            ipAddress
+        );
+        auditLogRepository.append(log);
+        return log;
+    }
+    public List<AuditLog> listAll() throws IOException {
+        return auditLogRepository.findAll();
+    }
+    public List<AuditLog> filter(String keyword) throws IOException {
+        return filter(log -> contains(log.getAction(), keyword)
+            || contains(log.getDetail(), keyword)
+            || contains(log.getRole(), keyword)
+            || contains(log.getEntityType(), keyword));
+    }
+    public List<AuditLog> filter(Predicate<AuditLog> predicate) throws IOException {
+        return auditLogRepository.findAll()
+            .stream()
+            .filter(predicate)
+            .collect(Collectors.toList());
+    }
+    private boolean contains(String source, String keyword) {
+        return source != null && keyword != null && source.contains(keyword);
+    }
+}
+
+src/clinic/service/CalendarEventService.java
+package clinic.service;
+import clinic.model.CalendarEvent;
+import clinic.persistence.CalendarEventRepository;
+import clinic.persistence.CsvDataStore;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+public class CalendarEventService {
+    private final CalendarEventRepository calendarEventRepository;
+    public CalendarEventService(CalendarEventRepository calendarEventRepository) {
+        this.calendarEventRepository = calendarEventRepository;
+    }
+    public List<CalendarEvent> listAll() throws IOException {
+        return calendarEventRepository.findAll();
+    }
+    public List<CalendarEvent> listByOwner(String doctorId) throws IOException {
+        return calendarEventRepository.findByOwner(doctorId);
+    }
+    public CalendarEvent createEvent(String title, LocalDateTime start, LocalDateTime end, String patientId, String ownerDoctorId, String location, String notes) throws IOException {
+        CalendarEvent event = new CalendarEvent(
+            CsvDataStore.randomId(),
+            title,
+            start,
+            end,
+            patientId,
+            ownerDoctorId,
+            location,
+            notes
+        );
+        calendarEventRepository.save(event);
+        return event;
+    }
+    public void updateEvent(CalendarEvent event) throws IOException {
+        calendarEventRepository.save(event);
+    }
+    public void deleteEvent(String id) throws IOException {
+        calendarEventRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/MeetingMinuteService.java
+package clinic.service;
+import clinic.model.MeetingMinute;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.MeetingMinuteRepository;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+public class MeetingMinuteService {
+    private final MeetingMinuteRepository meetingMinuteRepository;
+    public MeetingMinuteService(MeetingMinuteRepository meetingMinuteRepository) {
+        this.meetingMinuteRepository = meetingMinuteRepository;
+    }
+    public List<MeetingMinute> listAll() throws IOException {
+        return meetingMinuteRepository.findAll();
+    }
+    public List<MeetingMinute> listBySession(String sessionId) throws IOException {
+        return meetingMinuteRepository.findBySession(sessionId);
+    }
+    public MeetingMinute createMinute(String sessionId, String authorDoctorId, String summary, String actionItems) throws IOException {
+        MeetingMinute minute = new MeetingMinute(
+            CsvDataStore.randomId(),
+            sessionId,
+            LocalDateTime.now(),
+            authorDoctorId,
+            summary,
+            actionItems
+        );
+        meetingMinuteRepository.save(minute);
+        return minute;
+    }
+    public void updateMinute(MeetingMinute minute) throws IOException {
+        meetingMinuteRepository.save(minute);
+    }
+    public void deleteMinute(String id) throws IOException {
+        meetingMinuteRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/ExpertSessionService.java
+package clinic.service;
+import clinic.model.ExpertParticipant;
+import clinic.model.ExpertSession;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.ExpertParticipantRepository;
+import clinic.persistence.ExpertSessionRepository;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+public class ExpertSessionService {
+    private final ExpertSessionRepository sessionRepository;
+    private final ExpertParticipantRepository participantRepository;
+    public ExpertSessionService(ExpertSessionRepository sessionRepository, ExpertParticipantRepository participantRepository) {
+        this.sessionRepository = sessionRepository;
+        this.participantRepository = participantRepository;
+    }
+    public List<ExpertSession> listSessions() throws IOException {
+        return sessionRepository.findAll();
+    }
+    public ExpertSession createSession(String title, String hostDoctorId, LocalDateTime scheduledAt, String status, String meetingUrl, String notes) throws IOException {
+        ExpertSession session = new ExpertSession(
+            CsvDataStore.randomId(),
+            title,
+            hostDoctorId,
+            scheduledAt,
+            status,
+            meetingUrl,
+            notes
+        );
+        sessionRepository.save(session);
+        return session;
+    }
+    public void updateSession(ExpertSession session) throws IOException {
+        sessionRepository.save(session);
+    }
+    public void deleteSession(String id) throws IOException {
+        sessionRepository.deleteById(id);
+        participantRepository.replaceSessionParticipants(id, new ArrayList<>());
+    }
+    public List<ExpertParticipant> listParticipants(String sessionId) throws IOException {
+        return participantRepository.findBySessionId(sessionId);
+    }
+    public void setParticipants(String sessionId, List<ExpertParticipant> participants) throws IOException {
+        participantRepository.replaceSessionParticipants(sessionId, participants);
+    }
+    public void addParticipant(String sessionId, String participantId, String role) throws IOException {
+        List<ExpertParticipant> participants = new ArrayList<>(participantRepository.findBySessionId(sessionId));
+        participants.add(new ExpertParticipant(sessionId, participantId, role));
+        participantRepository.replaceSessionParticipants(sessionId, participants);
+    }
+    public void removeParticipant(String sessionId, String participantId) throws IOException {
+        List<ExpertParticipant> participants = new ArrayList<>(participantRepository.findBySessionId(sessionId));
+        participants.removeIf(p -> p.getParticipantId().equals(participantId));
+        participantRepository.replaceSessionParticipants(sessionId, participants);
+    }
+}
+
+src/clinic/service/ConsultationService.java
+package clinic.service;
+import clinic.model.Consultation;
+import clinic.persistence.ConsultationRepository;
+import clinic.persistence.CsvDataStore;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+public class ConsultationService {
+    private final ConsultationRepository consultationRepository;
+    public ConsultationService(ConsultationRepository consultationRepository) {
+        this.consultationRepository = consultationRepository;
+    }
+    public List<Consultation> listConsultations() throws IOException {
+        return consultationRepository.findAll();
+    }
+    public List<Consultation> listByPatient(String patientId) throws IOException {
+        return consultationRepository.findAll().stream()
+            .filter(c -> c.getPatientId().equals(patientId))
+            .collect(Collectors.toList());
+    }
+    public Consultation createConsultation(String patientId, String doctorId, String appointmentId, String summary, String prescriptionId) throws IOException {
+        Consultation consultation = new Consultation(
+            CsvDataStore.randomId(),
+            patientId,
+            doctorId,
+            appointmentId,
+            summary,
+            prescriptionId,
+            LocalDateTime.now()
+        );
+        consultationRepository.save(consultation);
+        return consultation;
+    }
+    public void updateConsultation(Consultation consultation) throws IOException {
+        consultationRepository.save(consultation);
+    }
+    public void deleteConsultation(String id) throws IOException {
+        consultationRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/PharmacyService.java
+package clinic.service;
+import clinic.model.Medicine;
+import clinic.model.Prescription;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.MedicineRepository;
+import clinic.persistence.PrescriptionRepository;
+import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
+public class PharmacyService {
+    private final MedicineRepository medicineRepository;
+    private final PrescriptionRepository prescriptionRepository;
+    public PharmacyService(MedicineRepository medicineRepository, PrescriptionRepository prescriptionRepository) {
+        this.medicineRepository = medicineRepository;
+        this.prescriptionRepository = prescriptionRepository;
+    }
+    public List<Medicine> listMedicines() throws IOException {
+        return medicineRepository.findAll();
+    }
+    public List<Prescription> listPrescriptions() throws IOException {
+        return prescriptionRepository.findAll();
+    }
+    public Medicine addMedicine(String name, String specification, int stock, String unit, java.time.LocalDate expiryDate) throws IOException {
+        Medicine medicine = new Medicine(
+            CsvDataStore.randomId(),
+            name,
+            specification,
+            stock,
+            unit,
+            expiryDate
+        );
+        medicineRepository.save(medicine);
+        return medicine;
+    }
+    public void updateMedicine(Medicine medicine) throws IOException {
+        medicineRepository.save(medicine);
+    }
+    public void removeMedicine(String id) throws IOException {
+        medicineRepository.deleteById(id);
+    }
+    public Prescription createPrescription(String consultationId, String medicineId, int quantity, String usage) throws IOException {
+        Prescription prescription = new Prescription(
+            CsvDataStore.randomId(),
+            consultationId,
+            medicineId,
+            quantity,
+            usage,
+            "PENDING"
+        );
+        prescriptionRepository.save(prescription);
+        return prescription;
+    }
+    public void updatePrescriptionStatus(String prescriptionId, String status) throws IOException {
+        List<Prescription> prescriptions = prescriptionRepository.findAll();
+        for (Prescription prescription : prescriptions) {
+            if (prescription.getId().equals(prescriptionId)) {
+                Prescription updated = new Prescription(
+                    prescription.getId(),
+                    prescription.getConsultationId(),
+                    prescription.getMedicineId(),
+                    prescription.getQuantity(),
+                    prescription.getUsage(),
+                    status
+                );
+                prescriptionRepository.save(updated);
+                return;
+            }
+        }
+        throw new IllegalArgumentException("未找到处方");
+    }
+    public List<Prescription> listPendingPrescriptions() throws IOException {
+        return prescriptionRepository.findAll().stream()
+            .filter(p -> "PENDING".equalsIgnoreCase(p.getStatus()))
+            .collect(Collectors.toList());
+    }
+}
+
+src/clinic/service/PaymentService.java
+package clinic.service;
+import clinic.model.Payment;
+import clinic.model.Payment.RelatedType;
+import clinic.model.Payment.Status;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.PaymentRepository;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+public class PaymentService {
+    private final PaymentRepository paymentRepository;
+    public PaymentService(PaymentRepository paymentRepository) {
+        this.paymentRepository = paymentRepository;
+    }
+    public List<Payment> listAll() throws IOException {
+        return paymentRepository.findAll();
+    }
+    public List<Payment> listByPatient(String patientId) throws IOException {
+        return paymentRepository.findByPatient(patientId);
+    }
+    public Optional<Payment> findById(String id) throws IOException {
+        return paymentRepository.findById(id);
+    }
+    public Payment createPayment(String patientId,
+                                 RelatedType relatedType,
+                                 String relatedId,
+                                 BigDecimal amount,
+                                 String currency,
+                                 String method) throws IOException {
+        if (amount.compareTo(BigDecimal.ZERO) < 0) {
+            throw new IllegalArgumentException("支付金额不能为负");
+        }
+        Payment payment = new Payment(
+            CsvDataStore.randomId(),
+            patientId,
+            relatedType,
+            relatedId,
+            amount,
+            currency,
+            method,
+            Status.PENDING,
+            null,
+            LocalDateTime.now(),
+            null
+        );
+        paymentRepository.save(payment);
+        return payment;
+    }
+    public Payment markPaid(String paymentId) throws IOException {
+        Payment payment = paymentRepository.findById(paymentId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到支付记录"));
+        Payment updated = payment.withStatus(Status.PAID, LocalDateTime.now());
+        paymentRepository.save(updated);
+        return updated;
+    }
+    public Payment markFailed(String paymentId) throws IOException {
+        Payment payment = paymentRepository.findById(paymentId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到支付记录"));
+        Payment updated = payment.withStatus(Status.FAILED, payment.getPaidAt());
+        paymentRepository.save(updated);
+        return updated;
+    }
+    public Payment refund(String paymentId) throws IOException {
+        Payment payment = paymentRepository.findById(paymentId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到支付记录"));
+        if (payment.getStatus() != Status.PAID) {
+            throw new IllegalStateException("非已支付订单无法退款");
+        }
+        Payment updated = payment.withStatus(Status.REFUNDED, LocalDateTime.now());
+        paymentRepository.save(updated);
+        return updated;
+    }
+    public BigDecimal sumByStatus(List<Payment> payments, Status status) {
+        return payments.stream()
+            .filter(p -> p.getStatus() == status)
+            .map(Payment::getAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    public BigDecimal calculateRevenue(LocalDateTime from, LocalDateTime to) throws IOException {
+        return paymentRepository.findAll().stream()
+            .filter(p -> p.getStatus() == Status.PAID)
+            .filter(p -> !p.getPaidAt().isBefore(from) && !p.getPaidAt().isAfter(to))
+            .map(Payment::getAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    public List<Payment> listOutstanding() throws IOException {
+        return paymentRepository.findAll().stream()
+            .filter(p -> p.getStatus() == Status.PENDING || p.getStatus() == Status.PROCESSING)
+            .collect(Collectors.toList());
+    }
+    public void attachInsuranceClaim(String paymentId, String claimId) throws IOException {
+        Payment payment = paymentRepository.findById(paymentId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到支付记录"));
+        paymentRepository.save(payment.withInsuranceClaim(claimId));
+    }
+}
+
+src/clinic/service/InventoryService.java
+package clinic.service;
+import clinic.model.StockMovement;
+import clinic.model.StockMovement.MovementType;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.StockMovementRepository;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+public class InventoryService {
+    private final StockMovementRepository stockMovementRepository;
+    public InventoryService(StockMovementRepository stockMovementRepository) {
+        this.stockMovementRepository = stockMovementRepository;
+    }
+    public List<StockMovement> listAll() throws IOException {
+        return stockMovementRepository.findAll();
+    }
+    public List<StockMovement> listByMedicine(String medicineId) throws IOException {
+        return stockMovementRepository.findByMedicine(medicineId);
+    }
+    public StockMovement recordInbound(String medicineId,
+                                       int quantity,
+                                       BigDecimal unitCost,
+                                       String referenceType,
+                                       String referenceId,
+                                       String operatorId,
+                                       String notes) throws IOException {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("入库数量必须大于0");
+        }
+        StockMovement movement = new StockMovement(
+            CsvDataStore.randomId(),
+            medicineId,
+            MovementType.INBOUND,
+            quantity,
+            unitCost,
+            null,
+            LocalDateTime.now(),
+            referenceType,
+            referenceId,
+            operatorId,
+            notes
+        );
+        stockMovementRepository.save(movement);
+        return movement;
+    }
+    public StockMovement recordOutbound(String medicineId,
+                                        int quantity,
+                                        BigDecimal unitCost,
+                                        String referenceType,
+                                        String referenceId,
+                                        String operatorId,
+                                        String notes) throws IOException {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("出库数量必须大于0");
+        }
+        StockMovement movement = new StockMovement(
+            CsvDataStore.randomId(),
+            medicineId,
+            MovementType.OUTBOUND,
+            -Math.abs(quantity),
+            unitCost,
+            null,
+            LocalDateTime.now(),
+            referenceType,
+            referenceId,
+            operatorId,
+            notes
+        );
+        stockMovementRepository.save(movement);
+        return movement;
+    }
+    public StockMovement recordAdjustment(String medicineId,
+                                          int quantityChange,
+                                          BigDecimal unitCost,
+                                          String reason,
+                                          String operatorId) throws IOException {
+        StockMovement movement = new StockMovement(
+            CsvDataStore.randomId(),
+            medicineId,
+            MovementType.ADJUSTMENT,
+            quantityChange,
+            unitCost,
+            null,
+            LocalDateTime.now(),
+            "ADJUSTMENT",
+            null,
+            operatorId,
+            reason
+        );
+        stockMovementRepository.save(movement);
+        return movement;
+    }
+    public BigDecimal calculateInventoryValue(String medicineId) throws IOException {
+        BigDecimal total = BigDecimal.ZERO;
+        for (StockMovement movement : stockMovementRepository.findByMedicine(medicineId)) {
+            total = total.add(movement.getTotalCost());
+        }
+        return total;
+    }
+    public int calculateOnHandQuantity(String medicineId) throws IOException {
+        int total = 0;
+        for (StockMovement movement : stockMovementRepository.findByMedicine(medicineId)) {
+            total += movement.getQuantity();
+        }
+        return total;
+    }
+}
+
+src/clinic/service/InsightService.java
+package clinic.service;
+import clinic.model.CaseRecord;
+import clinic.model.Consultation;
+import clinic.model.Doctor;
+import clinic.model.ExpertAdvice;
+import clinic.model.Patient;
+import clinic.model.WorkProgress;
+import clinic.util.DoctorMatcher;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.Period;
+import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.StringJoiner;
+import java.util.stream.Collectors;
+public class InsightService {
+    private static final int MAX_CASE_ITEMS = 3;
+    private static final int MAX_CONSULTATION_ITEMS = 3;
+    private static final int MAX_ADVICE_ITEMS = 3;
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private final PatientService patientService;
+    private final DoctorService doctorService;
+    private final CaseRecordService caseRecordService;
+    private final ConsultationService consultationService;
+    private final WorkProgressService workProgressService;
+    private final ExpertAdviceService expertAdviceService;
+    public InsightService(
+        PatientService patientService,
+        DoctorService doctorService,
+        CaseRecordService caseRecordService,
+        ConsultationService consultationService,
+        WorkProgressService workProgressService,
+        ExpertAdviceService expertAdviceService
+    ) {
+        this.patientService = Objects.requireNonNull(patientService);
+        this.doctorService = Objects.requireNonNull(doctorService);
+        this.caseRecordService = Objects.requireNonNull(caseRecordService);
+        this.consultationService = Objects.requireNonNull(consultationService);
+        this.workProgressService = Objects.requireNonNull(workProgressService);
+        this.expertAdviceService = Objects.requireNonNull(expertAdviceService);
+    }
+    public String buildPatientInsight(String patientId) throws IOException {
+        Patient patient = locatePatient(patientId);
+        List<CaseRecord> caseRecords = caseRecordService.listByPatient(patientId);
+        List<Consultation> consultations = consultationService.listByPatient(patientId);
+        List<WorkProgress> progressList = workProgressService.listByPatient(patientId);
+        List<ExpertAdvice> advices = expertAdviceService.listByPatient(patientId);
+        StringBuilder builder = new StringBuilder();
+        builder.append("患者概况\n------------------------------\n");
+        builder.append("姓名: ").append(patient.getName());
+        if (patient.getGender() != null && !patient.getGender().isBlank()) {
+            builder.append(" | 性别: ").append(patient.getGender());
+        }
+        if (patient.getBirthday() != null) {
+            builder.append(" | 年龄: ").append(calculateAge(patient.getBirthday())).append("岁");
+        }
+        if (patient.getNotes() != null && !patient.getNotes().isBlank()) {
+            builder.append("\n备注: ").append(patient.getNotes());
+        }
+        builder.append("\n\n病例亮点\n------------------------------\n");
+        if (caseRecords.isEmpty()) {
+            builder.append("暂无历史病例记录\n");
+        } else {
+            caseRecords.stream()
+                .limit(MAX_CASE_ITEMS)
+                .forEach(record -> builder.append("- ")
+                    .append(record.getTitle())
+                    .append("｜标签: ")
+                    .append(record.getTags() == null || record.getTags().isBlank() ? "未标注" : record.getTags())
+                    .append("\n  摘要: ")
+                    .append(snippet(record.getSummary()))
+                    .append("\n"));
+            if (caseRecords.size() > MAX_CASE_ITEMS) {
+                builder.append("... 其余 ").append(caseRecords.size() - MAX_CASE_ITEMS).append(" 条病例可在病例库中查看\n");
+            }
+        }
+        builder.append("\n近期问诊\n------------------------------\n");
+        if (consultations.isEmpty()) {
+            builder.append("暂无问诊记录\n");
+        } else {
+            consultations.stream()
+                .sorted(Comparator.comparing(Consultation::getCreatedAt).reversed())
+                .limit(MAX_CONSULTATION_ITEMS)
+                .forEach(consultation -> builder.append("- ")
+                    .append(DATE_TIME_FORMATTER.format(consultation.getCreatedAt()))
+                    .append(" 由医生 ")
+                    .append(consultation.getDoctorId())
+                    .append(" 提供问诊\n  要点: ")
+                    .append(snippet(consultation.getSummary()))
+                    .append("\n"));
+            if (consultations.size() > MAX_CONSULTATION_ITEMS) {
+                builder.append("... 其余 ").append(consultations.size() - MAX_CONSULTATION_ITEMS).append(" 条问诊可在问诊记录中查看\n");
+            }
+        }
+        builder.append("\n跟进进度\n------------------------------\n");
+        if (progressList.isEmpty()) {
+            builder.append("暂无工作进度记录\n");
+        } else {
+            Map<String, Long> statusCounts = progressList.stream()
+                .collect(Collectors.groupingBy(progress -> normalize(progress.getStatus()), Collectors.counting()));
+            StringJoiner statusJoiner = new StringJoiner("，");
+            statusCounts.forEach((status, count) -> statusJoiner.add(status + ": " + count + " 项"));
+            builder.append("状态概览: ").append(statusJoiner).append("\n");
+            Optional<WorkProgress> latest = progressList.stream()
+                .filter(item -> item.getLastUpdated() != null)
+                .max(Comparator.comparing(WorkProgress::getLastUpdated));
+            latest.ifPresent(item -> builder.append("最近更新: ")
+                .append(item.getLastUpdated())
+                .append(" ｜ ")
+                .append(item.getDescription())
+                .append(" (状态: ")
+                .append(item.getStatus())
+                .append(")\n"));
+            builder.append("跟进建议: ").append(progressFollowUpSuggestion(statusCounts, latest)).append("\n");
+        }
+        builder.append("\n专家建议\n------------------------------\n");
+        if (advices.isEmpty()) {
+            builder.append("暂无专家建议\n");
+        } else {
+            advices.stream()
+                .sorted(Comparator.comparing(ExpertAdvice::getAdviceDate, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+                .limit(MAX_ADVICE_ITEMS)
+                .forEach(advice -> builder.append("- ")
+                    .append(advice.getAdviceDate())
+                    .append(" ｜ ")
+                    .append(snippet(advice.getAdviceSummary()))
+                    .append("\n  随访: ")
+                    .append(snippet(advice.getFollowUpPlan()))
+                    .append("\n"));
+            if (advices.size() > MAX_ADVICE_ITEMS) {
+                builder.append("... 其余 ").append(advices.size() - MAX_ADVICE_ITEMS).append(" 条建议可在专家建议模块查看\n");
+            }
+        }
+        return builder.toString();
+    }
+    public String buildDoctorWeeklySummary(String doctorId, LocalDate reference) throws IOException {
+        Doctor doctor = locateDoctor(doctorId);
+        LocalDate end = reference == null ? LocalDate.now() : reference;
+        LocalDate start = end.minusDays(6);
+        List<WorkProgress> progressItems = workProgressService.listAll().stream()
+            .filter(item -> DoctorMatcher.matches(item.getOwnerDoctorId(), doctor))
+            .filter(item -> item.getLastUpdated() != null)
+            .filter(item -> !item.getLastUpdated().isBefore(start) && !item.getLastUpdated().isAfter(end))
+            .collect(Collectors.toList());
+        List<ExpertAdvice> adviceItems = expertAdviceService.listAll().stream()
+            .filter(item -> DoctorMatcher.matches(item.getDoctorId(), doctor))
+            .filter(item -> item.getAdviceDate() != null)
+            .filter(item -> !item.getAdviceDate().isBefore(start) && !item.getAdviceDate().isAfter(end))
+            .collect(Collectors.toList());
+        List<Consultation> consultationItems = consultationService.listConsultations().stream()
+            .filter(item -> DoctorMatcher.matches(item.getDoctorId(), doctor))
+            .filter(item -> isWithin(item.getCreatedAt(), start, end))
+            .collect(Collectors.toList());
+        Map<String, String> patientNames = patientService.listPatients().stream()
+            .collect(Collectors.toMap(Patient::getId, Patient::getName));
+        StringBuilder builder = new StringBuilder();
+        builder.append("医生周报\n------------------------------\n");
+        builder.append("医生: ").append(doctor.getName());
+        if (doctor.getDepartment() != null && !doctor.getDepartment().isBlank()) {
+            builder.append("｜科室: ").append(doctor.getDepartment());
+        }
+        builder.append("\n统计范围: ").append(start).append(" 至 ").append(end).append("\n\n");
+        if (progressItems.isEmpty() && adviceItems.isEmpty() && consultationItems.isEmpty()) {
+            builder.append("本周暂无进度、问诊或专家建议记录。请确认数据是否已录入。\n");
+            return builder.toString();
+        }
+        if (!progressItems.isEmpty()) {
+            Map<String, Long> statusCounts = progressItems.stream()
+                .collect(Collectors.groupingBy(item -> normalize(item.getStatus()), Collectors.counting()));
+            Optional<WorkProgress> latestProgress = progressItems.stream()
+                .max(Comparator.comparing(WorkProgress::getLastUpdated));
+            builder.append("工作进度统计\n------------------------------\n");
+            builder.append("累计处理患者: ").append(countDistinctPatients(progressItems)).append(" 名\n");
+            statusCounts.forEach((status, count) -> builder.append("- ").append(status).append(": ").append(count).append(" 项\n"));
+            progressItems.stream()
+                .sorted(Comparator.comparing(WorkProgress::getLastUpdated).reversed())
+                .limit(3)
+                .forEach(item -> builder.append("  · ")
+                    .append(item.getLastUpdated())
+                    .append(" ｜ 患者 ")
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
+                    .append(" ｜ ")
+                    .append(item.getDescription())
+                    .append(" (状态: ")
+                    .append(item.getStatus())
+                    .append(")\n"));
+            builder.append("建议: ").append(progressFollowUpSuggestion(statusCounts, latestProgress)).append("\n\n");
+        }
+        if (!consultationItems.isEmpty()) {
+            builder.append("问诊亮点\n------------------------------\n");
+            builder.append("累计问诊: ").append(consultationItems.size()).append(" 场\n");
+            consultationItems.stream()
+                .sorted(Comparator.comparing(Consultation::getCreatedAt).reversed())
+                .limit(3)
+                .forEach(item -> builder.append("- ")
+                    .append(DATE_TIME_FORMATTER.format(item.getCreatedAt()))
+                    .append(" ｜ 患者 ")
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
+                    .append(" ｜ ")
+                    .append(snippet(item.getSummary()))
+                    .append("\n"));
+            builder.append("\n");
+        }
+        if (!adviceItems.isEmpty()) {
+            builder.append("专家建议/随访\n------------------------------\n");
+            builder.append("本周参与建议: ").append(adviceItems.size()).append(" 条\n");
+            adviceItems.stream()
+                .sorted(Comparator.comparing(ExpertAdvice::getAdviceDate).reversed())
+                .limit(3)
+                .forEach(item -> builder.append("- ")
+                    .append(item.getAdviceDate())
+                    .append(" ｜ 患者 ")
+                    .append(resolvePatientName(patientNames, item.getPatientId()))
+                    .append(" ｜ ")
+                    .append(snippet(item.getAdviceSummary()))
+                    .append("\n"));
+        }
+        return builder.toString();
+    }
+    private Patient locatePatient(String patientId) throws IOException {
+        return patientService.listPatients().stream()
+            .filter(patient -> patient.getId().equals(patientId))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("未找到指定患者"));
+    }
+    private Doctor locateDoctor(String doctorId) throws IOException {
+        return doctorService.listDoctors().stream()
+            .filter(doctor -> doctor.getId().equals(doctorId))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("未找到指定医生"));
+    }
+    private int calculateAge(LocalDate birthday) {
+        return Period.between(birthday, LocalDate.now()).getYears();
+    }
+    private String snippet(String text) {
+        if (text == null || text.isBlank()) {
+            return "暂无内容";
+        }
+        String trimmed = text.trim();
+        return trimmed.length() <= 48 ? trimmed : trimmed.substring(0, 45) + "...";
+    }
+    private String normalize(String status) {
+        if (status == null || status.isBlank()) {
+            return "未标明";
+        }
+        return status.trim().toUpperCase(Locale.ROOT);
+    }
+    private long countDistinctPatients(List<WorkProgress> progresses) {
+        return progresses.stream()
+            .map(WorkProgress::getPatientId)
+            .collect(Collectors.toSet())
+            .size();
+    }
+    private boolean isWithin(LocalDateTime time, LocalDate start, LocalDate end) {
+        LocalDate date = time.toLocalDate();
+        return !date.isBefore(start) && !date.isAfter(end);
+    }
+    private String progressFollowUpSuggestion(Map<String, Long> statusCounts, Optional<WorkProgress> latest) {
+        long pending = statusCounts.getOrDefault("PENDING", 0L);
+        long inProgress = statusCounts.getOrDefault("IN_PROGRESS", 0L);
+        long done = statusCounts.getOrDefault("DONE", 0L);
+        if (pending + inProgress >= 3) {
+            return "存在多项待处理任务，建议安排复诊或协调团队加快推进";
+        }
+        if (pending > 0) {
+            return "存在未开始的任务，建议尽快安排执行";
+        }
+        if (inProgress > 0 && latest.isPresent()) {
+            return "已有任务在进行中，关注进展并适时复查";
+        }
+        if (done > 0) {
+            return "当前任务均已完成，可安排巩固随访";
+        }
+        return "暂无明确建议";
+    }
+    private String resolvePatientName(Map<String, String> names, String id) {
+        return names.getOrDefault(id, id);
+    }
+}
+
+src/clinic/service/AuthService.java
+package clinic.service;
+import clinic.model.Patient;
+import clinic.model.Role;
+import clinic.model.User;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.PatientRepository;
+import clinic.persistence.UserRepository;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.util.HexFormat;
+import java.util.Optional;
+public class AuthService {
+    private final UserRepository userRepository;
+    private final PatientRepository patientRepository;
+    public AuthService(UserRepository userRepository, PatientRepository patientRepository) {
+        this.userRepository = userRepository;
+        this.patientRepository = patientRepository;
+    }
+    public Optional<User> login(String username, String password) throws IOException {
+        String hash = hash(password);
+        return userRepository.findByUsername(username)
+            .filter(user -> user.getPasswordHash().equals(hash));
+    }
+    public boolean userExists(String username) throws IOException {
+        return userRepository.findByUsername(username).isPresent();
+    }
+    public User registerPatient(String username, String password) throws IOException {
+        if (userRepository.findByUsername(username).isPresent()) {
+            throw new IllegalArgumentException("用户名已存在");
+        }
+        User user = new User(
+            CsvDataStore.randomId(),
+            username,
+            hash(password),
+            Role.PATIENT,
+            LocalDateTime.now()
+        );
+        userRepository.save(user);
+        if (patientRepository != null) {
+            Patient patient = new Patient(
+                user.getId(),
+                username,
+                "",
+                null,
+                "",
+                "",
+                "",
+                ""
+            );
+            patientRepository.save(patient);
+        }
+        return user;
+    }
+    public User createDoctorAccount(String username, String password) throws IOException {
+        if (userRepository.findByUsername(username).isPresent()) {
+            throw new IllegalArgumentException("用户名已存在");
+        }
+        User user = new User(
+            CsvDataStore.randomId(),
+            username,
+            hash(password),
+            Role.DOCTOR,
+            LocalDateTime.now()
+        );
+        userRepository.save(user);
+        return user;
+    }
+    private String hash(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(bytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("不支持的哈希算法", e);
+        }
+    }
+}
+
+src/clinic/service/ExpertAdviceService.java
+package clinic.service;
+import clinic.model.ExpertAdvice;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.ExpertAdviceRepository;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.List;
+public class ExpertAdviceService {
+    private final ExpertAdviceRepository expertAdviceRepository;
+    public ExpertAdviceService(ExpertAdviceRepository expertAdviceRepository) {
+        this.expertAdviceRepository = expertAdviceRepository;
+    }
+    public List<ExpertAdvice> listAll() throws IOException {
+        return expertAdviceRepository.findAll();
+    }
+    public List<ExpertAdvice> listByPatient(String patientId) throws IOException {
+        return expertAdviceRepository.findByPatient(patientId);
+    }
+    public ExpertAdvice createAdvice(String sessionId, String patientId, String doctorId, LocalDate date, String summary, String followUp) throws IOException {
+        ExpertAdvice advice = new ExpertAdvice(
+            CsvDataStore.randomId(),
+            sessionId,
+            patientId,
+            doctorId,
+            date,
+            summary,
+            followUp
+        );
+        expertAdviceRepository.save(advice);
+        return advice;
+    }
+    public void updateAdvice(ExpertAdvice advice) throws IOException {
+        expertAdviceRepository.save(advice);
+    }
+    public void deleteAdvice(String id) throws IOException {
+        expertAdviceRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/AppointmentService.java
+package clinic.service;
+import clinic.model.Appointment;
+import clinic.persistence.AppointmentRepository;
+import clinic.persistence.CsvDataStore;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+public class AppointmentService {
+    private final AppointmentRepository appointmentRepository;
+    public AppointmentService(AppointmentRepository appointmentRepository) {
+        this.appointmentRepository = appointmentRepository;
+    }
+    public List<Appointment> listAppointments() throws IOException {
+        return appointmentRepository.findAll();
+    }
+    public Appointment createAppointment(String patientId, String doctorId, LocalDateTime dateTime, String notes) throws IOException {
+        ensureNoConflict(doctorId, dateTime);
+        Appointment appointment = new Appointment(
+            CsvDataStore.randomId(),
+            patientId,
+            doctorId,
+            dateTime,
+            "PENDING",
+            notes
+        );
+        appointmentRepository.save(appointment);
+        return appointment;
+    }
+    public void updateStatus(String appointmentId, String status) throws IOException {
+        List<Appointment> all = appointmentRepository.findAll();
+        for (Appointment appointment : all) {
+            if (appointment.getId().equals(appointmentId)) {
+                Appointment updated = new Appointment(
+                    appointment.getId(),
+                    appointment.getPatientId(),
+                    appointment.getDoctorId(),
+                    appointment.getDateTime(),
+                    status,
+                    appointment.getNotes()
+                );
+                appointmentRepository.save(updated);
+                return;
+            }
+        }
+        throw new IllegalArgumentException("未找到预约");
+    }
+    public void deleteAppointment(String appointmentId) throws IOException {
+        appointmentRepository.deleteById(appointmentId);
+    }
+    private void ensureNoConflict(String doctorId, LocalDateTime dateTime) throws IOException {
+        for (Appointment existing : appointmentRepository.findAll()) {
+            if (existing.getDoctorId().equals(doctorId) && existing.getDateTime().equals(dateTime)) {
+                throw new IllegalArgumentException("该时间段医生已有预约");
+            }
+        }
+    }
+}
+
+src/clinic/service/DoctorService.java
+package clinic.service;
+import clinic.model.Doctor;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.DoctorRepository;
+import java.io.IOException;
+import java.util.List;
+public class DoctorService {
+    private final DoctorRepository doctorRepository;
+    public DoctorService(DoctorRepository doctorRepository) {
+        this.doctorRepository = doctorRepository;
+    }
+    public List<Doctor> listDoctors() throws IOException {
+        return doctorRepository.findAll();
+    }
+    public Doctor createDoctor(String name, String department, String phone, String schedule) throws IOException {
+        return createDoctor(name, department, phone, schedule, null, null, null, null);
+    }
+    public Doctor createDoctor(String name, String department, String phone, String schedule,
+                               Double rating, String title, String level, String specialties) throws IOException {
+        Doctor doctor = new Doctor(
+            CsvDataStore.randomId(),
+            name,
+            department,
+            phone,
+            schedule,
+            rating,
+            title,
+            level,
+            specialties
+        );
+        doctorRepository.save(doctor);
+        return doctor;
+    }
+    public void updateDoctor(Doctor doctor) throws IOException {
+        doctorRepository.save(doctor);
+    }
+    public void deleteDoctor(String id) throws IOException {
+        doctorRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/PatientService.java
+package clinic.service;
+import clinic.model.Patient;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.PatientRepository;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.List;
+public class PatientService {
+    private final PatientRepository patientRepository;
+    public PatientService(PatientRepository patientRepository) {
+        this.patientRepository = patientRepository;
+    }
+    public List<Patient> listPatients() throws IOException {
+        return patientRepository.findAll();
+    }
+    public Patient createPatient(String name, String gender, LocalDate birthday, String phone, String address, String emergencyContact, String notes) throws IOException {
+        Patient patient = new Patient(
+            CsvDataStore.randomId(),
+            name,
+            gender,
+            birthday,
+            phone,
+            address,
+            emergencyContact,
+            notes
+        );
+        patientRepository.save(patient);
+        return patient;
+    }
+    public void updatePatient(Patient patient) throws IOException {
+        patientRepository.save(patient);
+    }
+    public void deletePatient(String id) throws IOException {
+        patientRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/CaseRecordService.java
+package clinic.service;
+import clinic.model.CaseRecord;
+import clinic.persistence.CaseRecordRepository;
+import clinic.persistence.CsvDataStore;
+import java.io.IOException;
+import java.util.List;
+public class CaseRecordService {
+    private final CaseRecordRepository caseRecordRepository;
+    public CaseRecordService(CaseRecordRepository caseRecordRepository) {
+        this.caseRecordRepository = caseRecordRepository;
+    }
+    public List<CaseRecord> listAll() throws IOException {
+        return caseRecordRepository.findAll();
+    }
+    public List<CaseRecord> listByPatient(String patientId) throws IOException {
+        return caseRecordRepository.findByPatient(patientId);
+    }
+    public CaseRecord createCaseRecord(String patientId, String title, String summary, String tags, String attachment) throws IOException {
+        CaseRecord record = new CaseRecord(
+            CsvDataStore.randomId(),
+            patientId,
+            title,
+            summary,
+            tags,
+            attachment
+        );
+        caseRecordRepository.save(record);
+        return record;
+    }
+    public void updateCaseRecord(CaseRecord record) throws IOException {
+        caseRecordRepository.save(record);
+    }
+    public void deleteCaseRecord(String id) throws IOException {
+        caseRecordRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/WorkProgressService.java
+package clinic.service;
+import clinic.model.WorkProgress;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.WorkProgressRepository;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.List;
+public class WorkProgressService {
+    private final WorkProgressRepository workProgressRepository;
+    public WorkProgressService(WorkProgressRepository workProgressRepository) {
+        this.workProgressRepository = workProgressRepository;
+    }
+    public List<WorkProgress> listAll() throws IOException {
+        return workProgressRepository.findAll();
+    }
+    public List<WorkProgress> listByPatient(String patientId) throws IOException {
+        return workProgressRepository.findByPatient(patientId);
+    }
+    public WorkProgress createProgress(String patientId, String description, String status, LocalDate lastUpdated, String ownerDoctorId) throws IOException {
+        WorkProgress progress = new WorkProgress(
+            CsvDataStore.randomId(),
+            patientId,
+            description,
+            status,
+            lastUpdated,
+            ownerDoctorId
+        );
+        workProgressRepository.save(progress);
+        return progress;
+    }
+    public void updateProgress(WorkProgress progress) throws IOException {
+        workProgressRepository.save(progress);
+    }
+    public void deleteProgress(String id) throws IOException {
+        workProgressRepository.deleteById(id);
+    }
+}
+
+src/clinic/service/InsuranceClaimService.java
+package clinic.service;
+import clinic.model.InsuranceClaim;
+import clinic.model.InsuranceClaim.Status;
+import clinic.persistence.CsvDataStore;
+import clinic.persistence.InsuranceClaimRepository;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+public class InsuranceClaimService {
+    private final InsuranceClaimRepository claimRepository;
+    public InsuranceClaimService(InsuranceClaimRepository claimRepository) {
+        this.claimRepository = claimRepository;
+    }
+    public List<InsuranceClaim> listAll() throws IOException {
+        return claimRepository.findAll();
+    }
+    public Optional<InsuranceClaim> findById(String id) throws IOException {
+        return claimRepository.findById(id);
+    }
+    public List<InsuranceClaim> findByPaymentId(String paymentId) throws IOException {
+        return claimRepository.findByPaymentId(paymentId);
+    }
+    public InsuranceClaim submitClaim(String paymentId,
+                                      String insuranceType,
+                                      BigDecimal coverageRatio,
+                                      BigDecimal claimedAmount,
+                                      String notes) throws IOException {
+        InsuranceClaim claim = new InsuranceClaim(
+            CsvDataStore.randomId(),
+            paymentId,
+            insuranceType,
+            coverageRatio,
+            claimedAmount,
+            null,
+            Status.SUBMITTED,
+            LocalDateTime.now(),
+            null,
+            notes
+        );
+        claimRepository.save(claim);
+        return claim;
+    }
+    public InsuranceClaim approve(String claimId, BigDecimal approvedAmount, String notes) throws IOException {
+        InsuranceClaim claim = claimRepository.findById(claimId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到医保理赔"));
+        InsuranceClaim updated = claim.withStatus(Status.APPROVED, approvedAmount, LocalDateTime.now(), notes);
+        claimRepository.save(updated);
+        return updated;
+    }
+    public InsuranceClaim reject(String claimId, String notes) throws IOException {
+        InsuranceClaim claim = claimRepository.findById(claimId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到医保理赔"));
+        InsuranceClaim updated = claim.withStatus(Status.REJECTED, BigDecimal.ZERO, LocalDateTime.now(), notes);
+        claimRepository.save(updated);
+        return updated;
+    }
+    public InsuranceClaim completePayout(String claimId) throws IOException {
+        InsuranceClaim claim = claimRepository.findById(claimId)
+            .orElseThrow(() -> new IllegalArgumentException("未找到医保理赔"));
+        InsuranceClaim updated = claim.withStatus(Status.PAID, claim.getApprovedAmount(), LocalDateTime.now(), claim.getNotes());
+        claimRepository.save(updated);
+        return updated;
+    }
+}
+
+src/clinic/model/StockMovement.java
+package clinic.model;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Objects;
+public class StockMovement {
+    public enum MovementType {
+        INBOUND,
+        OUTBOUND,
+        ADJUSTMENT
+    }
+    private final String id;
+    private final String medicineId;
+    private final MovementType movementType;
+    private final int quantity;
+    private final BigDecimal unitCost;
+    private final BigDecimal totalCost;
+    private final LocalDateTime occurredAt;
+    private final String referenceType;
+    private final String referenceId;
+    private final String operatorId;
+    private final String notes;
+    public StockMovement(String id,
+                         String medicineId,
+                         MovementType movementType,
+                         int quantity,
+                         BigDecimal unitCost,
+                         BigDecimal totalCost,
+                         LocalDateTime occurredAt,
+                         String referenceType,
+                         String referenceId,
+                         String operatorId,
+                         String notes) {
+        this.id = Objects.requireNonNull(id);
+        this.medicineId = Objects.requireNonNull(medicineId);
+        this.movementType = Objects.requireNonNull(movementType);
+        this.quantity = quantity;
+        this.unitCost = unitCost == null ? BigDecimal.ZERO : unitCost;
+        this.totalCost = totalCost == null ? this.unitCost.multiply(BigDecimal.valueOf(quantity)) : totalCost;
+        this.occurredAt = occurredAt == null ? LocalDateTime.now() : occurredAt;
+        this.referenceType = referenceType;
+        this.referenceId = referenceId;
+        this.operatorId = operatorId;
+        this.notes = notes == null ? "" : notes;
+    }
+    public String getId() {
+        return id;
+    }
+    public String getMedicineId() {
+        return medicineId;
+    }
+    public MovementType getMovementType() {
+        return movementType;
+    }
+    public int getQuantity() {
+        return quantity;
+    }
+    public BigDecimal getUnitCost() {
+        return unitCost;
+    }
+    public BigDecimal getTotalCost() {
+        return totalCost;
+    }
+    public LocalDateTime getOccurredAt() {
+        return occurredAt;
+    }
+    public String getReferenceType() {
+        return referenceType;
+    }
+    public String getReferenceId() {
+        return referenceId;
+    }
+    public String getOperatorId() {
+        return operatorId;
+    }
+    public String getNotes() {
+        return notes;
+    }
+}
+
+src/clinic/persistence/CsvDataStore.java
+package clinic.persistence;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import clinic.persistence.mysql.CsvToMySqlMirror;
+public final class CsvDataStore {
+    private CsvDataStore() {
+    }
+    public static List<String[]> readRecords(Path file) throws IOException {
+        ensureFile(file);
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        List<String[]> records = new ArrayList<>();
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            records.add(line.split("\\|", -1));
+        }
+        return records;
+    }
+    public static void writeRecords(Path file, String header, List<String[]> records) throws IOException {
+        ensureFile(file);
+        List<String> lines = new ArrayList<>(records.size() + 1);
+        lines.add(header);
+        for (String[] record : records) {
+            lines.add(String.join("|", record));
+        }
+        Files.write(file, lines, StandardCharsets.UTF_8);
+        CsvToMySqlMirror.getInstance().mirror(file, header, records);
+    }
+    public static String randomId() {
+        return UUID.randomUUID().toString();
+    }
+    public static String timestamp() {
+        return LocalDateTime.now().toString();
+    }
+    private static void ensureFile(Path file) throws IOException {
+        if (Files.notExists(file)) {
+            Files.createDirectories(file.getParent());
+            Files.createFile(file);
+        }
+    }
+}
+
+src/clinic/model/ExpertSession.java
+package clinic.model;
+import java.time.LocalDateTime;
+import java.util.Objects;
+public class ExpertSession {
+    private final String id;
+    private final String title;
+    private final String hostDoctorId;
+    private final LocalDateTime scheduledAt;
+    private final String status;
+    private final String meetingUrl;
+    private final String notes;
+    public ExpertSession(String id, String title, String hostDoctorId, LocalDateTime scheduledAt, String status, String meetingUrl, String notes) {
+        this.id = Objects.requireNonNull(id);
+        this.title = Objects.requireNonNull(title);
+        this.hostDoctorId = Objects.requireNonNull(hostDoctorId);
+        this.scheduledAt = scheduledAt;
+        this.status = status == null ? "SCHEDULED" : status;
+        this.meetingUrl = meetingUrl;
+        this.notes = notes == null ? "" : notes;
+    }
+    public String getId() {
+        return id;
+    }
+    public String getTitle() {
+        return title;
+    }
+    public String getHostDoctorId() {
+        return hostDoctorId;
+    }
+    public LocalDateTime getScheduledAt() {
+        return scheduledAt;
+    }
+    public String getStatus() {
+        return status;
+    }
+    public String getMeetingUrl() {
+        return meetingUrl;
+    }
+    public String getNotes() {
+        return notes;
+    }
+}
+
+src/clinic/model/Patient.java
+package clinic.model;
+import java.time.LocalDate;
+import java.util.Objects;
+public class Patient {
+    private final String id;
+    private final String name;
+    private final String gender;
+    private final LocalDate birthday;
+    private final String phone;
+    private final String address;
+    private final String emergencyContact;
+    private final String notes;
+    public Patient(String id, String name, String gender, LocalDate birthday, String phone, String address, String emergencyContact, String notes) {
+        this.id = Objects.requireNonNull(id);
+        this.name = Objects.requireNonNull(name);
+        this.gender = gender;
+        this.birthday = birthday;
+        this.phone = phone;
+        this.address = address;
+        this.emergencyContact = emergencyContact;
+        this.notes = notes == null ? "" : notes;
+    }
+    public String getId() {
+        return id;
+    }
+    public String getName() {
+        return name;
+    }
+    public String getGender() {
+        return gender;
+    }
+    public LocalDate getBirthday() {
+        return birthday;
+    }
+    public String getPhone() {
+        return phone;
+    }
+    public String getAddress() {
+        return address;
+    }
+    public String getEmergencyContact() {
+        return emergencyContact;
+    }
+    public String getNotes() {
+        return notes;
+    }
+}
+
+src/clinic/model/Medicine.java
+package clinic.model;
+import java.time.LocalDate;
+import java.util.Objects;
+public class Medicine {
+    private final String id;
+    private final String name;
+    private final String specification;
+    private final int stock;
+    private final String unit;
+    private final LocalDate expiryDate;
+    public Medicine(String id, String name, String specification, int stock, String unit, LocalDate expiryDate) {
+        this.id = Objects.requireNonNull(id);
+        this.name = Objects.requireNonNull(name);
+        this.specification = specification;
+        this.stock = Math.max(stock, 0);
+        this.unit = unit;
+        this.expiryDate = expiryDate;
+    }
+    public String getId() {
+        return id;
+    }
+    public String getName() {
+        return name;
+    }
+    public String getSpecification() {
+        return specification;
+    }
+    public int getStock() {
+        return stock;
+    }
+    public String getUnit() {
+        return unit;
+    }
+    public LocalDate getExpiryDate() {
+        return expiryDate;
+    }
+}
+
+src/clinic/model/Role.java
+package clinic.model;
+public enum Role {
+    ADMIN,
+    DOCTOR,
+    PATIENT
+}
+
+src/clinic/ui/doctor/FinanceCenterPanel.java
+package clinic.ui.doctor;
+import clinic.AppContext;
+import clinic.model.InsuranceClaim;
+import clinic.model.Payment;
+import clinic.model.User;
+import clinic.service.InsuranceClaimService;
+import clinic.service.PaymentService;
+import clinic.ui.Refreshable;
+import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JTable;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.table.DefaultTableModel;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.math.BigDecimal;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+public class FinanceCenterPanel extends JPanel implements Refreshable {
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private final AppContext context;
+    private final User operator;
+    private final PaymentService paymentService;
+    private final InsuranceClaimService claimService;
+    private final DefaultTableModel paymentModel;
+    private final DefaultTableModel claimModel;
+    private final JTable paymentTable;
+    private final JTable claimTable;
+    private final JLabel pendingAmountLabel = new JLabel("待支付：0.00");
+    private final JLabel paidAmountLabel = new JLabel("已支付：0.00");
+    private final JLabel refundAmountLabel = new JLabel("已退款：0.00");
+    public FinanceCenterPanel(AppContext context, User operator) {
+        this.context = context;
+        this.operator = operator;
+        this.paymentService = context.getPaymentService();
+        this.claimService = context.getInsuranceClaimService();
+        setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
+        paymentModel = new DefaultTableModel(new String[]{
+            "支付编号", "患者", "关联类型", "关联编号", "金额", "币种", "方式", "状态", "理赔编号", "创建时间", "完成时间"
+        }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        paymentTable = new JTable(paymentModel);
+        paymentTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(paymentTable);
+        claimModel = new DefaultTableModel(new String[]{
+            "理赔编号", "支付编号", "类型", "报销比例", "申请金额", "核准金额", "状态", "提交时间", "处理时间", "备注"
+        }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        claimTable = new JTable(claimModel);
+        claimTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(claimTable);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+            buildPaymentPanel(), buildClaimPanel());
+        splitPane.setResizeWeight(0.55);
+        add(splitPane, BorderLayout.CENTER);
+        add(buildSummaryPanel(), BorderLayout.SOUTH);
+        refreshData();
+    }
+    private JPanel buildPaymentPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
+        header.add(new JLabel("支付流水"));
+        header.add(new JLabel("搜索:"));
+        JTextField searchField = new JTextField(18);
+        TableUtils.installSearchFilter(paymentTable, searchField);
+        header.add(searchField);
+        JButton refreshButton = new JButton("刷新");
+        refreshButton.addActionListener(e -> refreshPayments());
+        header.add(refreshButton);
+        panel.add(header, BorderLayout.NORTH);
+        panel.add(new JScrollPane(paymentTable), BorderLayout.CENTER);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton createButton = new JButton("登记费用");
+        JButton markPaidButton = new JButton("标记已支付");
+        JButton markFailedButton = new JButton("标记失败");
+        JButton refundButton = new JButton("退款");
+        JButton submitClaimButton = new JButton("提交理赔");
+        actions.add(createButton);
+        actions.add(markPaidButton);
+        actions.add(markFailedButton);
+        actions.add(refundButton);
+        actions.add(submitClaimButton);
+        panel.add(actions, BorderLayout.SOUTH);
+        createButton.addActionListener(e -> createPayment());
+        markPaidButton.addActionListener(e -> markPaymentPaid());
+        markFailedButton.addActionListener(e -> markPaymentFailed());
+        refundButton.addActionListener(e -> refundPayment());
+        submitClaimButton.addActionListener(e -> submitClaim());
+        return panel;
+    }
+    private JPanel buildClaimPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
+        header.add(new JLabel("医保理赔"));
+        header.add(new JLabel("搜索:"));
+        JTextField searchField = new JTextField(18);
+        TableUtils.installSearchFilter(claimTable, searchField);
+        header.add(searchField);
+        JButton refreshButton = new JButton("刷新");
+        refreshButton.addActionListener(e -> refreshClaims());
+        header.add(refreshButton);
+        panel.add(header, BorderLayout.NORTH);
+        panel.add(new JScrollPane(claimTable), BorderLayout.CENTER);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton approveButton = new JButton("审核通过");
+        JButton rejectButton = new JButton("驳回理赔");
+        JButton payoutButton = new JButton("完成打款");
+        actions.add(approveButton);
+        actions.add(rejectButton);
+        actions.add(payoutButton);
+        panel.add(actions, BorderLayout.SOUTH);
+        approveButton.addActionListener(e -> approveClaim());
+        rejectButton.addActionListener(e -> rejectClaim());
+        payoutButton.addActionListener(e -> completeClaimPayout());
+        return panel;
+    }
+    private JPanel buildSummaryPanel() {
+        JPanel summary = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        summary.setBorder(BorderFactory.createTitledBorder("金额总览"));
+        summary.add(pendingAmountLabel);
+        summary.add(new JLabel(" | "));
+        summary.add(paidAmountLabel);
+        summary.add(new JLabel(" | "));
+        summary.add(refundAmountLabel);
+        return summary;
+    }
+    @Override
+    public void refreshData() {
+        refreshPayments();
+        refreshClaims();
+    }
+    private void refreshPayments() {
+        paymentModel.setRowCount(0);
+        try {
+            List<Payment> payments = paymentService.listAll();
+            BigDecimal pending = paymentService.sumByStatus(payments, Payment.Status.PENDING)
+                .add(paymentService.sumByStatus(payments, Payment.Status.PROCESSING));
+            BigDecimal paid = paymentService.sumByStatus(payments, Payment.Status.PAID);
+            BigDecimal refunded = paymentService.sumByStatus(payments, Payment.Status.REFUNDED);
+            pendingAmountLabel.setText("待支付：" + pending.toPlainString());
+            paidAmountLabel.setText("已支付：" + paid.toPlainString());
+            refundAmountLabel.setText("已退款：" + refunded.toPlainString());
+            for (Payment payment : payments) {
+                paymentModel.addRow(new Object[]{
+                    payment.getId(),
+                    payment.getPatientId(),
+                    payment.getRelatedType(),
+                    payment.getRelatedId(),
+                    payment.getAmount().toPlainString(),
+                    payment.getCurrency(),
+                    payment.getMethod(),
+                    payment.getStatus(),
+                    payment.getInsuranceClaimId(),
+                    payment.getCreatedAt() == null ? "" : DATE_TIME_FORMATTER.format(payment.getCreatedAt()),
+                    payment.getPaidAt() == null ? "" : DATE_TIME_FORMATTER.format(payment.getPaidAt())
+                });
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "加载支付数据失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void refreshClaims() {
+        claimModel.setRowCount(0);
+        try {
+            List<InsuranceClaim> claims = claimService.listAll();
+            for (InsuranceClaim claim : claims) {
+                claimModel.addRow(new Object[]{
+                    claim.getId(),
+                    claim.getPaymentId(),
+                    claim.getInsuranceType(),
+                    claim.getCoverageRatio(),
+                    claim.getClaimedAmount(),
+                    claim.getApprovedAmount(),
+                    claim.getStatus(),
+                    claim.getSubmittedAt() == null ? "" : DATE_TIME_FORMATTER.format(claim.getSubmittedAt()),
+                    claim.getProcessedAt() == null ? "" : DATE_TIME_FORMATTER.format(claim.getProcessedAt()),
+                    claim.getNotes()
+                });
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "加载理赔数据失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void createPayment() {
+        JTextField patientField = new JTextField();
+        JComboBox<Payment.RelatedType> typeCombo = new JComboBox<>(Payment.RelatedType.values());
+        JTextField relatedField = new JTextField();
+        JTextField amountField = new JTextField("0.00");
+        JTextField currencyField = new JTextField("CNY");
+        JTextField methodField = new JTextField("CASH");
+        JTextArea notesArea = new JTextArea(4, 18);
+        notesArea.setLineWrap(true);
+        Object[] message = {
+            "患者编号", patientField,
+            "关联类型", typeCombo,
+            "关联编号", relatedField,
+            "金额", amountField,
+            "币种", currencyField,
+            "支付方式", methodField,
+            "备注（写入审计）", new JScrollPane(notesArea)
+        };
+        if (JOptionPane.showConfirmDialog(this, message, "登记费用", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        try {
+            BigDecimal amount = new BigDecimal(amountField.getText().trim());
+            Payment payment = paymentService.createPayment(
+                patientField.getText().trim(),
+                (Payment.RelatedType) typeCombo.getSelectedItem(),
+                relatedField.getText().trim().isEmpty() ? null : relatedField.getText().trim(),
+                amount,
+                currencyField.getText().trim().isEmpty() ? "CNY" : currencyField.getText().trim(),
+                methodField.getText().trim().isEmpty() ? "CASH" : methodField.getText().trim()
+            );
+            logAudit("PAYMENT_CREATED", "PAYMENT", payment.getId(), notesArea.getText(), "SUCCESS");
+            refreshPayments();
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "金额格式不正确", "提示", JOptionPane.WARNING_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "创建支付失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void markPaymentPaid() {
+        String paymentId = getSelectedPaymentId();
+        if (paymentId == null) {
+            return;
+        }
+        try {
+            paymentService.markPaid(paymentId);
+            logAudit("PAYMENT_MARK_PAID", "PAYMENT", paymentId, "标记为已支付", "SUCCESS");
+            refreshPayments();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "操作失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void markPaymentFailed() {
+        String paymentId = getSelectedPaymentId();
+        if (paymentId == null) {
+            return;
+        }
+        try {
+            paymentService.markFailed(paymentId);
+            logAudit("PAYMENT_MARK_FAILED", "PAYMENT", paymentId, "标记为失败", "SUCCESS");
+            refreshPayments();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "操作失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void refundPayment() {
+        String paymentId = getSelectedPaymentId();
+        if (paymentId == null) {
+            return;
+        }
+        int confirm = JOptionPane.showConfirmDialog(this, "确认对该支付执行退款？", "确认", JOptionPane.OK_CANCEL_OPTION);
+        if (confirm != JOptionPane.OK_OPTION) {
+            return;
+        }
+        try {
+            paymentService.refund(paymentId);
+            logAudit("PAYMENT_REFUND", "PAYMENT", paymentId, "执行退款", "SUCCESS");
+            refreshPayments();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "退款失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void submitClaim() {
+        String paymentId = getSelectedPaymentId();
+        if (paymentId == null) {
+            return;
+        }
+        JTextField typeField = new JTextField("PUBLIC");
+        JTextField ratioField = new JTextField("0.8");
+        JTextField amountField = new JTextField("0.00");
+        JTextArea notesArea = new JTextArea(4, 18);
+        notesArea.setLineWrap(true);
+        Object[] message = {
+            "医保类型", typeField,
+            "覆盖比例 (0-1)", ratioField,
+            "申请金额", amountField,
+            "申请备注", new JScrollPane(notesArea)
+        };
+        if (JOptionPane.showConfirmDialog(this, message, "提交理赔", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        try {
+            BigDecimal ratio = new BigDecimal(ratioField.getText().trim());
+            BigDecimal amount = new BigDecimal(amountField.getText().trim());
+            InsuranceClaim claim = claimService.submitClaim(paymentId, typeField.getText().trim(), ratio, amount, notesArea.getText());
+            paymentService.attachInsuranceClaim(paymentId, claim.getId());
+            logAudit("CLAIM_SUBMIT", "INSURANCE_CLAIM", claim.getId(), "提交理赔", "SUCCESS");
+            refreshData();
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "比例或金额格式不正确", "提示", JOptionPane.WARNING_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "提交理赔失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void approveClaim() {
+        String claimId = getSelectedClaimId();
+        if (claimId == null) {
+            return;
+        }
+        JTextField amountField = new JTextField("0.00");
+        JTextArea notesArea = new JTextArea(4, 18);
+        notesArea.setLineWrap(true);
+        Object[] message = {
+            "核准金额", amountField,
+            "备注", new JScrollPane(notesArea)
+        };
+        if (JOptionPane.showConfirmDialog(this, message, "审核通过", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        try {
+            BigDecimal amount = new BigDecimal(amountField.getText().trim());
+            claimService.approve(claimId, amount, notesArea.getText());
+            logAudit("CLAIM_APPROVE", "INSURANCE_CLAIM", claimId, "审核通过", "SUCCESS");
+            refreshClaims();
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "金额格式不正确", "提示", JOptionPane.WARNING_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "审核失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void rejectClaim() {
+        String claimId = getSelectedClaimId();
+        if (claimId == null) {
+            return;
+        }
+        JTextArea notesArea = new JTextArea(4, 18);
+        notesArea.setLineWrap(true);
+        Object[] message = {
+            "驳回原因", new JScrollPane(notesArea)
+        };
+        if (JOptionPane.showConfirmDialog(this, message, "驳回理赔", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        try {
+            claimService.reject(claimId, notesArea.getText());
+            logAudit("CLAIM_REJECT", "INSURANCE_CLAIM", claimId, notesArea.getText(), "SUCCESS");
+            refreshClaims();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "驳回失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void completeClaimPayout() {
+        String claimId = getSelectedClaimId();
+        if (claimId == null) {
+            return;
+        }
+        try {
+            claimService.completePayout(claimId);
+            logAudit("CLAIM_PAYOUT", "INSURANCE_CLAIM", claimId, "完成打款", "SUCCESS");
+            refreshClaims();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "打款失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private String getSelectedPaymentId() {
+        int viewRow = paymentTable.getSelectedRow();
+        if (viewRow < 0) {
+            JOptionPane.showMessageDialog(this, "请先选择一笔支付记录", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return null;
+        }
+        int modelRow = paymentTable.convertRowIndexToModel(viewRow);
+        return paymentModel.getValueAt(modelRow, 0).toString();
+    }
+    private String getSelectedClaimId() {
+        int viewRow = claimTable.getSelectedRow();
+        if (viewRow < 0) {
+            JOptionPane.showMessageDialog(this, "请先选择一条理赔记录", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return null;
+        }
+        int modelRow = claimTable.convertRowIndexToModel(viewRow);
+        return claimModel.getValueAt(modelRow, 0).toString();
+    }
+    private void logAudit(String action, String entityType, String entityId, String detail, String result) {
+        try {
+            context.getAuditService().logAction(
+                operator.getId(),
+                operator.getRole().name(),
+                action,
+                entityType,
+                entityId,
+                detail == null ? "" : detail,
+                result,
+                null
+            );
+        } catch (Exception ignored) {
+        }
+    }
+}
+
+src/clinic/ui/doctor/ExpertSessionManagementPanel.java
+package clinic.ui.doctor;
+import clinic.AppContext;
+import clinic.model.Doctor;
+import clinic.model.ExpertParticipant;
+import clinic.model.ExpertSession;
+import clinic.model.MeetingMinute;
+import clinic.model.Patient;
+import clinic.security.PermissionGuard;
+import clinic.ui.Refreshable;
+import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.table.DefaultTableModel;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.GridLayout;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+public class ExpertSessionManagementPanel extends JPanel implements Refreshable {
+    private final AppContext context;
+    private final PermissionGuard permissionGuard;
+    private final DefaultTableModel model;
+    private final JTable table;
+    private final Map<String, ExpertSession> sessionIndex = new HashMap<>();
+    public ExpertSessionManagementPanel(AppContext context, PermissionGuard permissionGuard) {
+        this.context = context;
+        this.permissionGuard = permissionGuard;
+        setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
+        model = new DefaultTableModel(new String[]{"编号", "主题", "主持医生", "时间", "状态", "会议链接", "备注"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(header);
+        header.add(new JLabel("专家会诊室"));
+        header.add(new JLabel("搜索:"));
+        JTextField searchField = new JTextField(18);
+        TableUtils.installSearchFilter(table, searchField);
+        header.add(searchField);
+        JButton refreshButton = new JButton("刷新");
+        refreshButton.addActionListener(e -> refreshData());
+        header.add(refreshButton);
+        add(header, BorderLayout.NORTH);
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton addButton = new JButton("新增");
+        JButton editButton = new JButton("编辑");
+        JButton deleteButton = new JButton("删除");
+        JButton participantsButton = new JButton("参与人员");
+        JButton minutesButton = new JButton("查看纪要");
+        JButton addMinuteButton = new JButton("新增纪要");
+        controls.add(addButton);
+        controls.add(editButton);
+        controls.add(deleteButton);
+        controls.add(participantsButton);
+        controls.add(minutesButton);
+        controls.add(addMinuteButton);
+        add(controls, BorderLayout.SOUTH);
+        addButton.addActionListener(e -> createSession());
+        editButton.addActionListener(e -> editSession());
+        deleteButton.addActionListener(e -> deleteSession());
+        participantsButton.addActionListener(e -> manageParticipants());
+        minutesButton.addActionListener(e -> viewMinutes());
+        addMinuteButton.addActionListener(e -> addMinute());
+        refreshData();
+    }
+    @Override
+    public void refreshData() {
+        model.setRowCount(0);
+        try {
+            Map<String, String> doctorNames = buildDoctorNames();
+            sessionIndex.clear();
+            for (ExpertSession session : context.getExpertSessionService().listSessions()) {
+                sessionIndex.put(session.getId(), session);
+                model.addRow(new Object[]{
+                    session.getId(),
+                    session.getTitle(),
+                    doctorNames.getOrDefault(session.getHostDoctorId(), session.getHostDoctorId()),
+                    session.getScheduledAt(),
+                    session.getStatus(),
+                    session.getMeetingUrl(),
+                    session.getNotes()
+                });
+            }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载会诊失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void createSession() {
+        Map<String, String> doctorNames;
+        try {
+            doctorNames = buildDoctorNames();
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载医生信息失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        SessionForm form = new SessionForm(doctorNames);
+        if (form.showDialog(this, "新增会诊")) {
+            try {
+                String doctorId = form.resolveDoctorId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "安排专家会诊")) {
+                    return;
+                }
+                context.getExpertSessionService().createSession(
+                    form.titleField.getText().trim(),
+                    doctorId,
+                    form.parseDateTime(),
+                    form.statusField.getText().trim().isEmpty() ? "SCHEDULED" : form.statusField.getText().trim(),
+                    form.meetingField.getText().trim(),
+                    form.notesField.getText().trim()
+                );
+                refreshData();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void editSession() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择会诊", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String id = model.getValueAt(row, 0).toString();
+        Optional<ExpertSession> optional;
+        try {
+            optional = findSessionById(id);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载会诊失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (optional.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "未找到会诊记录", "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        ExpertSession session = optional.get();
+        if (session.getHostDoctorId() != null && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "编辑专家会诊")) {
+            return;
+        }
+        Map<String, String> doctorNames;
+        try {
+            doctorNames = buildDoctorNames();
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载医生信息失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        SessionForm form = new SessionForm(doctorNames);
+        form.titleField.setText(session.getTitle());
+        form.setDoctor(session.getHostDoctorId());
+        form.datetimeField.setText(session.getScheduledAt() == null ? "" : session.getScheduledAt().toString());
+        form.statusField.setText(session.getStatus());
+        form.meetingField.setText(session.getMeetingUrl() == null ? "" : session.getMeetingUrl());
+        form.notesField.setText(session.getNotes());
+        if (form.showDialog(this, "编辑会诊")) {
+            try {
+                String hostDoctorId = form.resolveDoctorId();
+                if (session.getHostDoctorId() != null && !Objects.equals(session.getHostDoctorId(), hostDoctorId)
+                    && !permissionGuard.ensureDoctorAccess(this, hostDoctorId, "调整会诊主持医生")) {
+                    return;
+                }
+                ExpertSession updated = new ExpertSession(
+                    session.getId(),
+                    form.titleField.getText().trim(),
+                    hostDoctorId,
+                    form.parseDateTime(),
+                    form.statusField.getText().trim().isEmpty() ? session.getStatus() : form.statusField.getText().trim(),
+                    form.meetingField.getText().trim(),
+                    form.notesField.getText().trim()
+                );
+                context.getExpertSessionService().updateSession(updated);
+                refreshData();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void deleteSession() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择要删除的会诊", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String id = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(id);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "删除专家会诊")) {
+            return;
+        }
+        if (JOptionPane.showConfirmDialog(this, "确认删除该会诊?", "确认", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+            try {
+                context.getExpertSessionService().deleteSession(id);
+                refreshData();
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "删除失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void manageParticipants() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择会诊", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "维护会诊参与者")) {
+            return;
+        }
+        ParticipantsDialog dialog = new ParticipantsDialog(sessionId);
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+    private void viewMinutes() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择会诊", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "查看会诊纪要")) {
+            return;
+        }
+        try {
+            List<MeetingMinute> minutes = context.getMeetingMinuteService().listBySession(sessionId);
+            if (minutes.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "该会诊暂无会议纪要", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            StringBuilder builder = new StringBuilder();
+            for (MeetingMinute minute : minutes) {
+                builder.append("时间: ").append(formatDateTime(minute.getRecordedAt())).append('\n')
+                    .append("撰写人: ").append(resolveDoctorName(minute.getAuthorDoctorId())).append('\n')
+                    .append("概要: ").append(blankSafe(minute.getSummary())).append('\n')
+                    .append("行动项: ").append(blankSafe(minute.getActionItems())).append("\n\n");
+            }
+            JOptionPane.showMessageDialog(this, builder.toString(), "会议纪要", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载纪要失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void addMinute() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择会诊", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String sessionId = model.getValueAt(row, 0).toString();
+        ExpertSession session = sessionIndex.get(sessionId);
+        if (session != null && session.getHostDoctorId() != null
+            && !permissionGuard.ensureDoctorAccess(this, session.getHostDoctorId(), "新增会诊纪要")) {
+            return;
+        }
+        try {
+            List<Doctor> doctors = context.getDoctorService().listDoctors();
+            if (doctors.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "暂无医生信息", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            JComboBox<String> doctorCombo = new JComboBox<>(doctors.stream().map(Doctor::getName).toArray(String[]::new));
+            JTextField summaryField = new JTextField();
+            JTextField actionField = new JTextField();
+            Object[] message = {
+                "纪要医生", doctorCombo,
+                "概要", summaryField,
+                "行动项", actionField
+            };
+            if (JOptionPane.showConfirmDialog(this, message, "新增纪要", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+                String doctorId = doctors.get(doctorCombo.getSelectedIndex()).getId();
+                if (!permissionGuard.ensureDoctorAccess(this, doctorId, "登记会议纪要")) {
+                    return;
+                }
+                context.getMeetingMinuteService().createMinute(sessionId, doctorId, summaryField.getText().trim(), actionField.getText().trim());
+                JOptionPane.showMessageDialog(this, "已保存会议纪要", "提示", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private Optional<ExpertSession> findSessionById(String id) throws IOException {
+        return context.getExpertSessionService().listSessions().stream()
+            .filter(s -> s.getId().equals(id))
+            .findFirst();
+    }
+    private Map<String, String> buildDoctorNames() throws IOException {
+        Map<String, String> map = new HashMap<>();
+        for (Doctor doctor : context.getDoctorService().listDoctors()) {
+            map.put(doctor.getId(), doctor.getName());
+        }
+        return map;
+    }
+    private String resolveDoctorName(String doctorId) throws IOException {
+        if (doctorId == null || doctorId.isEmpty()) {
+            return "-";
+        }
+        return buildDoctorNames().getOrDefault(doctorId, doctorId);
+    }
+    private String formatDateTime(LocalDateTime time) {
+        return time == null ? "-" : time.toString().replace('T', ' ');
+    }
+    private String blankSafe(String value) {
+        return value == null || value.isBlank() ? "暂无" : value;
+    }
+    private class ParticipantsDialog extends JDialog {
+        private final DefaultTableModel participantModel;
+        private final JTable participantTable;
+        private final String sessionId;
+        ParticipantsDialog(String sessionId) {
+            super(JOptionPane.getFrameForComponent(ExpertSessionManagementPanel.this), "会诊参与人员", true);
+            this.sessionId = sessionId;
+            setSize(540, 320);
+            setLayout(new BorderLayout(10, 10));
+            participantModel = new DefaultTableModel(new String[]{"编号", "姓名", "身份", "角色"}, 0) {
+                @Override
+                public boolean isCellEditable(int row, int column) {
+                    return false;
+                }
+            };
+            participantTable = new JTable(participantModel);
+            TableUtils.installRowPreview(participantTable);
+            add(new JScrollPane(participantTable), BorderLayout.CENTER);
+            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+            JButton addButton = new JButton("新增");
+            JButton removeButton = new JButton("移除");
+            JButton closeButton = new JButton("关闭");
+            buttonPanel.add(addButton);
+            buttonPanel.add(removeButton);
+            buttonPanel.add(closeButton);
+            add(buttonPanel, BorderLayout.SOUTH);
+            addButton.addActionListener(e -> addParticipant());
+            removeButton.addActionListener(e -> removeParticipant());
+            closeButton.addActionListener(e -> dispose());
+            refreshParticipants();
+        }
+        private void refreshParticipants() {
+            participantModel.setRowCount(0);
+            try {
+                Map<String, String> doctorNames = buildDoctorNames();
+                Map<String, String> patientNames = new HashMap<>();
+                for (Patient patient : context.getPatientService().listPatients()) {
+                    patientNames.put(patient.getId(), patient.getName());
+                }
+                for (ExpertParticipant participant : context.getExpertSessionService().listParticipants(sessionId)) {
+                    String id = participant.getParticipantId();
+                    String role = doctorNames.containsKey(id) ? "医生" : patientNames.containsKey(id) ? "患者" : "其他";
+                    String name = doctorNames.getOrDefault(id, patientNames.getOrDefault(id, id));
+                    participantModel.addRow(new Object[]{id, name, role, participant.getParticipantRole()});
+                }
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "加载参与者失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+        private void addParticipant() {
+            try {
+                List<Doctor> doctors = context.getDoctorService().listDoctors();
+                List<Patient> patients = context.getPatientService().listPatients();
+                if (doctors.isEmpty() && patients.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "暂无可添加人员", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                JComboBox<String> typeCombo = new JComboBox<>(new String[]{"医生", "患者"});
+                JComboBox<String> personCombo = new JComboBox<>();
+                populatePersonCombo(typeCombo, personCombo, doctors, patients);
+                typeCombo.addActionListener(e -> populatePersonCombo(typeCombo, personCombo, doctors, patients));
+                JTextField roleField = new JTextField();
+                JPanel form = new JPanel(new GridLayout(0, 1, 4, 4));
+                form.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+                form.add(new JLabel("身份"));
+                form.add(typeCombo);
+                form.add(new JLabel("人员"));
+                form.add(personCombo);
+                form.add(new JLabel("会诊角色"));
+                form.add(roleField);
+                if (JOptionPane.showConfirmDialog(this, form, "新增参与者", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+                    if (personCombo.getSelectedItem() == null) {
+                        JOptionPane.showMessageDialog(this, "请选择人员", "提示", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    String id;
+                    if ("医生".equals(typeCombo.getSelectedItem())) {
+                        id = doctors.get(personCombo.getSelectedIndex()).getId();
+                        if (!permissionGuard.ensureDoctorAccess(ExpertSessionManagementPanel.this, id, "邀请医生参与会诊")) {
+                            return;
+                        }
+                    } else {
+                        id = patients.get(personCombo.getSelectedIndex()).getId();
+                    }
+                    context.getExpertSessionService().addParticipant(sessionId, id, roleField.getText().trim());
+                    refreshParticipants();
+                }
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+        private void removeParticipant() {
+            int row = participantTable.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(this, "请选择要移除的人员", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            String participantId = participantModel.getValueAt(row, 0).toString();
+            try {
+                Map<String, String> doctorNames = buildDoctorNames();
+                if (doctorNames.containsKey(participantId)
+                    && !permissionGuard.ensureDoctorAccess(ExpertSessionManagementPanel.this, participantId, "移除医生参与者")) {
+                    return;
+                }
+                context.getExpertSessionService().removeParticipant(sessionId, participantId);
+                refreshParticipants();
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "移除失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+        private void populatePersonCombo(JComboBox<String> typeCombo, JComboBox<String> personCombo, List<Doctor> doctors, List<Patient> patients) {
+            personCombo.removeAllItems();
+            if ("医生".equals(typeCombo.getSelectedItem())) {
+                for (Doctor doctor : doctors) {
+                    personCombo.addItem(doctor.getName());
+                }
+            } else {
+                for (Patient patient : patients) {
+                    personCombo.addItem(patient.getName());
+                }
+            }
+        }
+    }
+    private static class SessionForm {
+        final JTextField titleField = new JTextField();
+        final JComboBox<String> doctorCombo;
+        final Map<String, String> doctorIdByName;
+        final JTextField datetimeField = new JTextField("2025-01-01T09:00");
+        final JTextField statusField = new JTextField("SCHEDULED");
+        final JTextField meetingField = new JTextField();
+        final JTextField notesField = new JTextField();
+        SessionForm(Map<String, String> doctorNames) {
+            doctorIdByName = new HashMap<>();
+            doctorCombo = new JComboBox<>(doctorNames.values().toArray(new String[0]));
+            for (Map.Entry<String, String> entry : doctorNames.entrySet()) {
+                doctorIdByName.put(entry.getValue(), entry.getKey());
+            }
+        }
+        boolean showDialog(JPanel parent, String title) {
+            Object[] message = {
+                "主题", titleField,
+                "主持医生", doctorCombo,
+                "开始时间 (YYYY-MM-DDTHH:MM)", datetimeField,
+                "状态", statusField,
+                "会议链接", meetingField,
+                "备注", notesField
+            };
+            return JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION;
+        }
+        String resolveDoctorId() {
+            if (doctorCombo.getSelectedItem() == null) {
+                throw new IllegalArgumentException("请选择主持医生");
+            }
+            String name = doctorCombo.getSelectedItem().toString();
+            return doctorIdByName.getOrDefault(name, name);
+        }
+        void setDoctor(String doctorId) {
+            for (Map.Entry<String, String> entry : doctorIdByName.entrySet()) {
+                if (entry.getValue().equals(doctorId)) {
+                    doctorCombo.setSelectedItem(entry.getKey());
+                    return;
+                }
+            }
+        }
+        LocalDateTime parseDateTime() {
+            String value = datetimeField.getText().trim();
+            if (value.isEmpty()) {
+                return null;
+            }
+            try {
+                return LocalDateTime.parse(value);
+            } catch (DateTimeParseException ex) {
+                throw new IllegalArgumentException("时间格式应为YYYY-MM-DDTHH:MM");
+            }
+        }
+    }
+}
+
+src/clinic/ui/doctor/PatientManagementPanel.java
+package clinic.ui.doctor;
+import clinic.AppContext;
+import clinic.model.Patient;
+import clinic.ui.Refreshable;
+import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.table.DefaultTableModel;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.List;
+public class PatientManagementPanel extends JPanel implements Refreshable {
+    private final AppContext context;
+    private final DefaultTableModel model;
+    private final JTable table;
+    public PatientManagementPanel(AppContext context) {
+        this.context = context;
+        setLayout(new BorderLayout(10, 10));
+        UIUtils.applyPagePadding(this);
+        model = new DefaultTableModel(new String[]{"编号", "姓名", "性别", "生日", "电话", "地址", "紧急联系人", "备注"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        table = new JTable(model);
+        table.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(table);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(top);
+        top.add(new JLabel("患者档案"));
+        top.add(new JLabel("搜索:"));
+        JTextField searchField = new JTextField(20);
+        TableUtils.installSearchFilter(table, searchField);
+        top.add(searchField);
+        JButton refreshButton = new JButton("刷新");
+        refreshButton.addActionListener(e -> refreshData());
+        top.add(refreshButton);
+        add(top, BorderLayout.NORTH);
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton addButton = new JButton("新增患者");
+        JButton editButton = new JButton("编辑");
+        JButton deleteButton = new JButton("删除");
+        controls.add(addButton);
+        controls.add(editButton);
+        controls.add(deleteButton);
+        add(controls, BorderLayout.SOUTH);
+        addButton.addActionListener(e -> createPatient());
+        editButton.addActionListener(e -> editPatient());
+        deleteButton.addActionListener(e -> deletePatient());
+        refreshData();
+    }
+    @Override
+    public void refreshData() {
+        model.setRowCount(0);
+        try {
+            List<Patient> patients = context.getPatientService().listPatients();
+            for (Patient patient : patients) {
+                model.addRow(new Object[]{
+                    patient.getId(),
+                    patient.getName(),
+                    patient.getGender(),
+                    patient.getBirthday(),
+                    patient.getPhone(),
+                    patient.getAddress(),
+                    patient.getEmergencyContact(),
+                    patient.getNotes()
+                });
+            }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载患者失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void createPatient() {
+        PatientForm form = new PatientForm();
+        if (form.showDialog(this, "新增患者")) {
+            try {
+                context.getPatientService().createPatient(
+                    form.nameField.getText().trim(),
+                    form.genderField.getText().trim(),
+                    form.parseBirthday(),
+                    form.phoneField.getText().trim(),
+                    form.addressField.getText().trim(),
+                    form.emergencyField.getText().trim(),
+                    form.notesField.getText().trim()
+                );
+                refreshData();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void editPatient() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择要编辑的患者", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String id = model.getValueAt(row, 0).toString();
+        PatientForm form = new PatientForm();
+        form.nameField.setText(model.getValueAt(row, 1).toString());
+        form.genderField.setText(valueOrEmpty(model.getValueAt(row, 2)));
+        form.birthdayField.setText(valueOrEmpty(model.getValueAt(row, 3)));
+        form.phoneField.setText(valueOrEmpty(model.getValueAt(row, 4)));
+        form.notesField.setText(valueOrEmpty(model.getValueAt(row, 7)));
+        form.addressField.setText(valueOrEmpty(model.getValueAt(row, 5)));
+        form.emergencyField.setText(valueOrEmpty(model.getValueAt(row, 6)));
+        if (form.showDialog(this, "编辑患者")) {
+            try {
+                context.getPatientService().updatePatient(new Patient(
+                    id,
+                    form.nameField.getText().trim(),
+                    form.genderField.getText().trim(),
+                    form.parseBirthday(),
+                    form.phoneField.getText().trim(),
+                    form.addressField.getText().trim(),
+                    form.emergencyField.getText().trim(),
+                    form.notesField.getText().trim()
+                ));
+                refreshData();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void deletePatient() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择要删除的患者", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String id = model.getValueAt(row, 0).toString();
+        int confirm = JOptionPane.showConfirmDialog(this, "确认删除该患者?", "确认", JOptionPane.OK_CANCEL_OPTION);
+        if (confirm == JOptionPane.OK_OPTION) {
+            try {
+                context.getPatientService().deletePatient(id);
+                refreshData();
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "删除失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private String valueOrEmpty(Object value) {
+        return value == null ? "" : value.toString();
+    }
+    private static class PatientForm {
+        final JTextField nameField = new JTextField();
+        final JTextField genderField = new JTextField();
+        final JTextField birthdayField = new JTextField("1990-01-01");
+        final JTextField phoneField = new JTextField();
+        final JTextField addressField = new JTextField();
+        final JTextField emergencyField = new JTextField();
+        final JTextField notesField = new JTextField();
+        boolean showDialog(JPanel parent, String title) {
+            Object[] message = {
+                "姓名", nameField,
+                "性别", genderField,
+                "出生日期 (YYYY-MM-DD)", birthdayField,
+                "电话", phoneField,
+                "地址", addressField,
+                "紧急联系人", emergencyField,
+                "备注", notesField
+            };
+            int option = JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.OK_CANCEL_OPTION);
+            return option == JOptionPane.OK_OPTION;
+        }
+        LocalDate parseBirthday() {
+            String text = birthdayField.getText().trim();
+            if (text.isEmpty()) {
+                return null;
+            }
+            try {
+                return LocalDate.parse(text);
+            } catch (DateTimeParseException ex) {
+                throw new IllegalArgumentException("生日格式应为YYYY-MM-DD");
+            }
+        }
+    }
+}
+
+src/clinic/ui/doctor/MedicineManagementPanel.java
+package clinic.ui.doctor;
+import clinic.AppContext;
+import clinic.model.Medicine;
+import clinic.model.Prescription;
+import clinic.ui.Refreshable;
+import clinic.ui.common.TableUtils;
+import clinic.ui.common.UIUtils;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.table.DefaultTableModel;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.List;
+public class MedicineManagementPanel extends JPanel implements Refreshable {
+    private final AppContext context;
+    private final DefaultTableModel medicineModel;
+    private final DefaultTableModel prescriptionModel;
+    private final JTable medicineTable;
+    private final JTable prescriptionTable;
+    public MedicineManagementPanel(AppContext context) {
+    this.context = context;
+    setLayout(new BorderLayout(10, 10));
+    UIUtils.applyPagePadding(this);
+        medicineModel = new DefaultTableModel(new String[]{"编号", "名称", "规格", "库存", "单位", "有效期"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        prescriptionModel = new DefaultTableModel(new String[]{"处方编号", "咨询", "药品", "数量", "用法", "状态"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        medicineTable = new JTable(medicineModel);
+        medicineTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(medicineTable);
+        prescriptionTable = new JTable(prescriptionModel);
+        prescriptionTable.setFillsViewportHeight(true);
+        TableUtils.installRowPreview(prescriptionTable);
+        JPanel medicinePanel = new JPanel(new BorderLayout());
+        JPanel medicineHeader = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        UIUtils.applyHeaderSpacing(medicineHeader);
+        medicineHeader.add(new JLabel("药品库存"));
+        medicineHeader.add(new JLabel("搜索:"));
+        JTextField medicineSearch = new JTextField(14);
+        TableUtils.installSearchFilter(medicineTable, medicineSearch);
+        medicineHeader.add(medicineSearch);
+        JButton refreshButton = new JButton("刷新");
+        refreshButton.addActionListener(e -> refreshData());
+        medicineHeader.add(refreshButton);
+        medicinePanel.add(medicineHeader, BorderLayout.NORTH);
+        medicinePanel.add(new JScrollPane(medicineTable), BorderLayout.CENTER);
+        JPanel medicineControls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton addMed = new JButton("新增药品");
+        JButton editMed = new JButton("编辑");
+        JButton deleteMed = new JButton("删除");
+        medicineControls.add(addMed);
+        medicineControls.add(editMed);
+        medicineControls.add(deleteMed);
+        medicinePanel.add(medicineControls, BorderLayout.SOUTH);
+        JPanel prescriptionPanel = new JPanel(new BorderLayout());
+        JPanel prescriptionHeader = new JPanel(new FlowLayout(FlowLayout.LEFT));
+    UIUtils.applyHeaderSpacing(prescriptionHeader);
+        prescriptionHeader.add(new JLabel("处方任务"));
+        prescriptionHeader.add(new JLabel("搜索:"));
+        JTextField prescriptionSearch = new JTextField(14);
+        TableUtils.installSearchFilter(prescriptionTable, prescriptionSearch);
+        prescriptionHeader.add(prescriptionSearch);
+        prescriptionPanel.add(prescriptionHeader, BorderLayout.NORTH);
+        prescriptionPanel.add(new JScrollPane(prescriptionTable), BorderLayout.CENTER);
+        JPanel prescriptionControls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton markDone = new JButton("标记为已发药");
+        prescriptionControls.add(markDone);
+        prescriptionPanel.add(prescriptionControls, BorderLayout.SOUTH);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, medicinePanel, prescriptionPanel);
+        splitPane.setResizeWeight(0.6);
+        add(splitPane, BorderLayout.CENTER);
+        addMed.addActionListener(e -> addMedicine());
+        editMed.addActionListener(e -> editMedicine());
+        deleteMed.addActionListener(e -> deleteMedicine());
+        markDone.addActionListener(e -> markPrescriptionDone());
+        refreshData();
+    }
+    @Override
+    public void refreshData() {
+        refreshMedicines();
+        refreshPrescriptions();
+    }
+    private void refreshMedicines() {
+        medicineModel.setRowCount(0);
+        try {
+            List<Medicine> medicines = context.getPharmacyService().listMedicines();
+            for (Medicine medicine : medicines) {
+                medicineModel.addRow(new Object[]{
+                    medicine.getId(),
+                    medicine.getName(),
+                    medicine.getSpecification(),
+                    medicine.getStock(),
+                    medicine.getUnit(),
+                    medicine.getExpiryDate()
+                });
+            }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载药品失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void refreshPrescriptions() {
+        prescriptionModel.setRowCount(0);
+        try {
+            List<Prescription> prescriptions = context.getPharmacyService().listPrescriptions();
+            for (Prescription prescription : prescriptions) {
+                prescriptionModel.addRow(new Object[]{
+                    prescription.getId(),
+                    prescription.getConsultationId(),
+                    prescription.getMedicineId(),
+                    prescription.getQuantity(),
+                    prescription.getUsage(),
+                    prescription.getStatus()
+                });
+            }
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "加载处方失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private void addMedicine() {
+        MedicineForm form = new MedicineForm();
+        if (form.showDialog(this, "新增药品")) {
+            try {
+                context.getPharmacyService().addMedicine(
+                    form.nameField.getText().trim(),
+                    form.specField.getText().trim(),
+                    form.parseStock(),
+                    form.unitField.getText().trim(),
+                    form.parseExpiry()
+                );
+                refreshMedicines();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void editMedicine() {
+        int row = medicineTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择要编辑的药品", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        MedicineForm form = new MedicineForm();
+        form.nameField.setText(medicineModel.getValueAt(row, 1).toString());
+        form.specField.setText(valueOrEmpty(medicineModel.getValueAt(row, 2)));
+        form.stockField.setText(valueOrEmpty(medicineModel.getValueAt(row, 3)));
+        form.unitField.setText(valueOrEmpty(medicineModel.getValueAt(row, 4)));
+        form.expiryField.setText(valueOrEmpty(medicineModel.getValueAt(row, 5)));
+        if (form.showDialog(this, "编辑药品")) {
+            try {
+                context.getPharmacyService().updateMedicine(new Medicine(
+                    medicineModel.getValueAt(row, 0).toString(),
+                    form.nameField.getText().trim(),
+                    form.specField.getText().trim(),
+                    form.parseStock(),
+                    form.unitField.getText().trim(),
+                    form.parseExpiry()
+                ));
+                refreshMedicines();
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "保存失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void deleteMedicine() {
+        int row = medicineTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择要删除的药品", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int confirm = JOptionPane.showConfirmDialog(this, "确认删除该药品?", "确认", JOptionPane.OK_CANCEL_OPTION);
+        if (confirm == JOptionPane.OK_OPTION) {
+            try {
+                context.getPharmacyService().removeMedicine(medicineModel.getValueAt(row, 0).toString());
+                refreshMedicines();
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "删除失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    private void markPrescriptionDone() {
+        int row = prescriptionTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "请选择处方", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        String id = prescriptionModel.getValueAt(row, 0).toString();
+        try {
+            context.getPharmacyService().updatePrescriptionStatus(id, "DONE");
+            refreshPrescriptions();
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "更新失败:" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    private String valueOrEmpty(Object value) {
+        return value == null ? "" : value.toString();
+    }
+    private static class MedicineForm {
+        final JTextField nameField = new JTextField();
+        final JTextField specField = new JTextField();
+        final JTextField stockField = new JTextField("0");
+        final JTextField unitField = new JTextField();
+        final JTextField expiryField = new JTextField("2025-12-31");
+        boolean showDialog(JPanel parent, String title) {
+            Object[] message = {
+                "名称", nameField,
+                "规格", specField,
+                "库存", stockField,
+                "单位", unitField,
+                "有效期 (YYYY-MM-DD)", expiryField
+            };
+            int option = JOptionPane.showConfirmDialog(parent, message, title, JOptionPane.OK_CANCEL_OPTION);
+            return option == JOptionPane.OK_OPTION;
+        }
+        int parseStock() {
+            try {
+                return Integer.parseInt(stockField.getText().trim());
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("库存需为数字");
+            }
+        }
+        LocalDate parseExpiry() {
+            String text = expiryField.getText().trim();
+            if (text.isEmpty()) {
+                return null;
+            }
+            try {
+                return LocalDate.parse(text);
+            } catch (DateTimeParseException ex) {
+                throw new IllegalArgumentException("有效期格式应为YYYY-MM-DD");
+            }
+        }
+    }
+}
